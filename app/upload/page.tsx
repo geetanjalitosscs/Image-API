@@ -68,7 +68,22 @@ export default function UploadPage() {
 
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto', padding: '2rem' }}>
-      <h1 style={{ marginBottom: '2rem', fontSize: '2rem', fontWeight: '600' }}>Image Upload</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+        <h1 style={{ fontSize: '2rem', fontWeight: '600', margin: 0 }}>Image Upload</h1>
+        <a
+          href="/images"
+          style={{
+            padding: '0.5rem 1rem',
+            background: '#10b981',
+            color: 'white',
+            textDecoration: 'none',
+            borderRadius: '4px',
+            fontSize: '0.875rem',
+          }}
+        >
+          View All Images
+        </a>
+      </div>
 
       <div style={{ marginBottom: '2rem' }}>
         <input

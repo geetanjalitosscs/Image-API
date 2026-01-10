@@ -1,24 +1,46 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-
 export default function HomePage() {
-  const router = useRouter();
-
-  useEffect(() => {
-    router.push('/upload');
-  }, [router]);
-
   return (
     <div style={{ 
       display: 'flex', 
+      flexDirection: 'column',
       justifyContent: 'center', 
       alignItems: 'center', 
       height: '100vh',
-      fontSize: '1.2rem'
+      gap: '2rem'
     }}>
-      Redirecting to upload page...
+      <h1 style={{ fontSize: '2.5rem', fontWeight: '600', margin: 0 }}>Image Upload & Gallery</h1>
+      <div style={{ display: 'flex', gap: '1rem' }}>
+        <a
+          href="/upload"
+          style={{
+            padding: '1rem 2rem',
+            background: '#3b82f6',
+            color: 'white',
+            textDecoration: 'none',
+            borderRadius: '8px',
+            fontSize: '1.1rem',
+            fontWeight: '500',
+          }}
+        >
+          Upload Images
+        </a>
+        <a
+          href="/images"
+          style={{
+            padding: '1rem 2rem',
+            background: '#10b981',
+            color: 'white',
+            textDecoration: 'none',
+            borderRadius: '8px',
+            fontSize: '1.1rem',
+            fontWeight: '500',
+          }}
+        >
+          View All Images
+        </a>
+      </div>
     </div>
   );
 }
