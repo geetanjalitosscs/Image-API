@@ -56,6 +56,10 @@ export default function UploadPage() {
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
+        // Redirect to gallery after successful upload
+        setTimeout(() => {
+          window.location.href = '/images';
+        }, 1500);
       } else {
         const errorMsg = data.error || 'Upload failed.';
         const errorDetails = data.errors && data.errors.length > 0 

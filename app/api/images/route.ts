@@ -14,6 +14,9 @@ function isValidImageFile(filename: string): boolean {
   return ALLOWED_EXTENSIONS.includes(ext);
 }
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   try {
     if (IS_VERCEL) {

@@ -11,6 +11,9 @@ const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 const IS_VERCEL = process.env.VERCEL === '1';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 function sanitizeFilename(filename: string): string {
   return filename
     .replace(/[^a-zA-Z0-9.-]/g, '_')
