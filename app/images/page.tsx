@@ -19,13 +19,22 @@ export default function ImagesPage() {
       const data = await response.json();
 
       if (response.ok) {
-        const imageData: ImageData[] = data.images.map((url: string) => {
-          const filename = url.split('/').pop() || '';
-          return {
-            url: `/api/images/${filename}`,
-            filename: filename,
-          };
-        });
+        // Use imagesWithUrls if available (Vercel Blob), otherwise use images array
+        let imageData: ImageData[];
+        if (data.imagesWithUrls && Array.isArray(data.imagesWithUrls)) {
+          imageData = data.imagesWithUrls.map((item: any) => ({
+            url: item.directUrl || item.apiUrl,
+            filename: item.filename || item.apiUrl.split('/').pop() || '',
+          }));
+        } else {
+          imageData = data.images.map((url: string) => {
+            const filename = url.split('/').pop() || '';
+            return {
+              url: `/api/images/${filename}`,
+              filename: filename,
+            };
+          });
+        }
         setImages(imageData);
         setError(null);
       } else {

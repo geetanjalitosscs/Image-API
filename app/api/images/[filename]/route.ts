@@ -37,20 +37,19 @@ export async function GET(
       try {
         const { list } = await import('@vercel/blob');
         const { blobs } = await list();
-        const blob = blobs.find(b => b.pathname.endsWith(filename));
+        
+        // Try to find blob by exact filename match in pathname
+        const blob = blobs.find(b => {
+          const blobFilename = b.pathname.split('/').pop() || b.pathname;
+          return blobFilename === filename || b.pathname.endsWith(filename);
+        });
+        
+        console.log(`Looking for filename: ${filename}`);
+        console.log(`Found blob:`, blob ? { pathname: blob.pathname, url: blob.url } : 'Not found');
         
         if (blob && blob.url) {
-          // Fetch the blob content
-          const response = await fetch(blob.url);
-          if (response.ok) {
-            const blobData = await response.blob();
-            return new NextResponse(blobData, {
-              headers: {
-                'Content-Type': contentType,
-                'Cache-Control': 'public, max-age=31536000, immutable',
-              },
-            });
-          }
+          // Redirect to blob URL directly (more efficient)
+          return NextResponse.redirect(blob.url, 307);
         }
         return NextResponse.json({ error: 'File not found' }, { status: 404 });
       } catch (error) {

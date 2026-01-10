@@ -23,14 +23,33 @@ export async function GET() {
       }
       try {
         const { blobs } = await list();
+        console.log('Total blobs found:', blobs.length);
+        console.log('Blob samples:', blobs.slice(0, 3).map(b => ({ pathname: b.pathname, url: b.url })));
+        
         const imageFiles = blobs
           .filter(blob => {
             const ext = path.extname(blob.pathname).toLowerCase();
             return ALLOWED_EXTENSIONS.includes(ext);
           })
-          .map(blob => `/api/images/${blob.pathname.split('/').pop()}`)
-          .sort();
+          .map(blob => {
+            // Extract filename from pathname (handle both /filename and filename formats)
+            const filename = blob.pathname.split('/').pop() || blob.pathname;
+            // Return both API path and direct blob URL
+            return {
+              apiUrl: `/api/images/${filename}`,
+              directUrl: blob.url,
+              filename: filename
+            };
+          })
+          .sort((a, b) => a.filename.localeCompare(b.filename));
         
+        // Return both formats for compatibility
+        return NextResponse.json({ 
+          images: imageFiles.map(img => img.apiUrl),
+          imagesWithUrls: imageFiles 
+        });
+        
+        console.log('Image files:', imageFiles);
         return NextResponse.json({ images: imageFiles });
       } catch (error) {
         console.error('Error listing blobs:', error);
