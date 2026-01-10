@@ -38,15 +38,22 @@ export async function GET() {
           .map(blob => {
             // Extract filename from pathname (handle both /filename and filename formats)
             const filename = blob.pathname.split('/').pop() || blob.pathname;
+            // Get file extension to determine content type
+            const ext = path.extname(filename).toLowerCase();
+            const contentType = 
+              ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+              ext === '.png' ? 'image/png' :
+              ext === '.webp' ? 'image/webp' :
+              null;
             // Return complete image data
             return {
               filename: filename,
               apiUrl: `/api/images/${filename}`,
               directUrl: blob.url,
               pathname: blob.pathname,
-              size: blob.size || null,
-              uploadedAt: blob.uploadedAt || null,
-              contentType: blob.contentType || null
+              size: (blob as any).size || null,
+              uploadedAt: (blob as any).uploadedAt || null,
+              contentType: contentType
             };
           })
           .sort((a, b) => a.filename.localeCompare(b.filename));
