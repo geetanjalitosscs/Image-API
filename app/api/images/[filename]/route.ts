@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { get } from '@vercel/blob';
+import { head } from '@vercel/blob';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 const IS_VERCEL = process.env.VERCEL === '1';
@@ -32,14 +32,10 @@ export async function GET(
 
     if (IS_VERCEL) {
       try {
-        const blob = await get(filename);
-        const response = new NextResponse(blob, {
-          headers: {
-            'Content-Type': contentType,
-            'Cache-Control': 'public, max-age=31536000, immutable',
-          },
-        });
-        return response;
+        // Check if blob exists and get its URL
+        const blob = await head(filename);
+        // Redirect to the blob URL
+        return NextResponse.redirect(blob.url, 307);
       } catch (error) {
         return NextResponse.json({ error: 'File not found' }, { status: 404 });
       }

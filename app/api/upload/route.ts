@@ -7,6 +7,7 @@ import { put } from '@vercel/blob';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 const IS_VERCEL = process.env.VERCEL === '1';
 
@@ -30,7 +31,10 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const files = formData.getAll('images') as File[];
 
+    console.log('Received files count:', files.length);
+
     if (files.length === 0) {
+      console.error('No files in formData');
       return NextResponse.json({ error: 'No files provided' }, { status: 400 });
     }
 
@@ -38,13 +42,28 @@ export async function POST(request: NextRequest) {
     const errors: string[] = [];
 
     for (const file of files) {
+      console.log(`Processing file: ${file.name}, type: ${file.type}, size: ${file.size}`);
+
       if (!(file instanceof File)) {
+        console.error(`Invalid file object: ${typeof file}`);
         errors.push('Invalid file object');
         continue;
       }
 
-      if (!ALLOWED_TYPES.includes(file.type.toLowerCase())) {
-        errors.push(`${file.name}: Invalid file type. Only JPG, PNG, and WEBP are allowed.`);
+      const fileType = file.type.toLowerCase();
+      const fileExt = path.extname(file.name).toLowerCase();
+      
+      // Check both MIME type and file extension
+      const isValidType = ALLOWED_TYPES.includes(fileType) || 
+                         (fileType === '' && ALLOWED_EXTENSIONS.includes(fileExt)) ||
+                         ALLOWED_EXTENSIONS.includes(fileExt);
+      
+      console.log(`File type check: MIME=${fileType}, Ext=${fileExt}, Valid=${isValidType}`);
+
+      if (!isValidType) {
+        const errorMsg = `${file.name}: Invalid file type (MIME: ${fileType || 'unknown'}, Ext: ${fileExt}). Only JPG, PNG, and WEBP are allowed.`;
+        console.error(errorMsg);
+        errors.push(errorMsg);
         continue;
       }
 
@@ -78,12 +97,16 @@ export async function POST(request: NextRequest) {
           uploadedFiles.push(uniqueFilename);
         }
       } catch (error) {
-        console.error(`Error uploading ${file.name}:`, error);
-        errors.push(`${file.name}: Failed to save file.`);
+        const errorDetails = error instanceof Error ? error.message : String(error);
+        console.error(`Error uploading ${file.name}:`, errorDetails);
+        errors.push(`${file.name}: Failed to save file - ${errorDetails}`);
       }
     }
 
+    console.log(`Upload complete - Success: ${uploadedFiles.length}, Errors: ${errors.length}`);
+
     if (uploadedFiles.length === 0) {
+      console.error('No files uploaded successfully. Errors:', errors);
       return NextResponse.json(
         { error: 'No files were uploaded', errors },
         { status: 400 }

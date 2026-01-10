@@ -57,7 +57,12 @@ export default function UploadPage() {
           fileInputRef.current.value = '';
         }
       } else {
-        setMessage({ type: 'error', text: data.error || 'Upload failed.' });
+        const errorMsg = data.error || 'Upload failed.';
+        const errorDetails = data.errors && data.errors.length > 0 
+          ? ` ${data.errors.join('; ')}` 
+          : '';
+        console.error('Upload error:', errorMsg, errorDetails);
+        setMessage({ type: 'error', text: errorMsg + errorDetails });
       }
     } catch (error) {
       setMessage({ type: 'error', text: 'Network error. Please try again.' });
