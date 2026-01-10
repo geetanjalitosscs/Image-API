@@ -26,11 +26,21 @@ export async function GET() {
         });
       }
       try {
-        const { blobs } = await list();
-        console.log('Total blobs found:', blobs.length);
-        console.log('Blob samples:', blobs.slice(0, 3).map(b => ({ pathname: b.pathname, url: b.url })));
+        // List all blobs with higher limit to get all images
+        let allBlobs: any[] = [];
+        let cursor: string | undefined = undefined;
         
-        const imageFiles = blobs
+        // Fetch all blobs with pagination
+        do {
+          const result: { blobs: any[]; cursor?: string } = await list({ limit: 1000, cursor });
+          allBlobs = allBlobs.concat(result.blobs);
+          cursor = result.cursor;
+        } while (cursor);
+        
+        console.log('Total blobs found:', allBlobs.length);
+        console.log('Blob samples:', allBlobs.slice(0, 3).map(b => ({ pathname: b.pathname, url: b.url })));
+        
+        const imageFiles = allBlobs
           .filter(blob => {
             const ext = path.extname(blob.pathname).toLowerCase();
             return ALLOWED_EXTENSIONS.includes(ext);
@@ -57,11 +67,17 @@ export async function GET() {
           })
           .sort((a, b) => a.title.localeCompare(b.title));
         
-        console.log('Image files:', imageFiles);
+        console.log('Filtered image files:', imageFiles.length);
         return NextResponse.json({ 
           success: true,
           count: imageFiles.length,
           images: imageFiles
+        }, {
+          headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
         });
       } catch (error) {
         console.error('Error listing blobs:', error);
@@ -69,7 +85,7 @@ export async function GET() {
           success: false,
           count: 0,
           images: [],
-          error: 'Failed to list images'
+          error: error instanceof Error ? error.message : 'Failed to list images'
         });
       }
     } else {

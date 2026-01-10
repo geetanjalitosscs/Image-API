@@ -15,7 +15,13 @@ export default function ImagesPage() {
   const fetchImages = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/images');
+      // Add cache busting to get fresh data
+      const response = await fetch('/api/images', {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache'
+        }
+      });
       const data = await response.json();
 
       if (response.ok) {

@@ -29,26 +29,57 @@ export default function ImageViewPage() {
 
         if (response.ok) {
           // Handle new JSON format with images array of objects
-          const imageUrls = data.images.map((item: any) => {
+          const imageData = data.images.map((item: any) => {
             if (typeof item === 'string') {
-              return item.split('/').pop() || '';
+              const extractedFilename = item.split('/').pop() || '';
+              return {
+                filename: extractedFilename,
+                url: item
+              };
             }
-            // Extract filename from URL
-            return item.url ? item.url.split('/').pop()?.split('?')[0] || '' : '';
+            // Extract filename from URL - handle both blob URLs and API URLs
+            const url = item.url || '';
+            let extractedFilename = '';
+            if (url.includes('blob.vercel-storage.com')) {
+              // Vercel blob URL - extract the actual filename
+              const urlParts = url.split('/');
+              const lastPart = urlParts[urlParts.length - 1]?.split('?')[0] || '';
+              // Remove Vercel blob suffix if present (format: filename-randomSuffix.ext)
+              extractedFilename = lastPart;
+            } else {
+              // API URL format
+              extractedFilename = url.split('/').pop()?.split('?')[0] || '';
+            }
+            return {
+              filename: extractedFilename,
+              url: url
+            };
           });
-          setAllImages(imageUrls);
           
-          const index = imageUrls.findIndex((img: string) => img === filename);
-          if (index === -1) {
+          // Store full URLs for navigation
+          setAllImages(imageData.map((img: { filename: string; url: string }) => img.filename));
+          
+          // Find matching image - check both exact match and partial match
+          const matchedImage = imageData.find((img: { filename: string; url: string }) => {
+            const imgBaseName = img.filename.split('.')[0];
+            const paramBaseName = filename.split('.')[0];
+            return img.filename === filename || 
+                   img.filename.includes(filename) || 
+                   filename.includes(imgBaseName) ||
+                   imgBaseName === paramBaseName;
+          });
+          
+          if (!matchedImage) {
             setError('Image not found');
             return;
           }
           
-          setCurrentIndex(index);
+          const index = imageData.findIndex((img: any) => img.filename === matchedImage.filename);
+          setCurrentIndex(index >= 0 ? index : 0);
           setImageInfo({
-            filename: filename,
-            url: `/api/images/${filename}`,
-            apiUrl: `/api/images/${filename}`,
+            filename: matchedImage.filename,
+            url: matchedImage.url,
+            apiUrl: `/api/images/${matchedImage.filename}`,
           });
           setError(null);
         } else {
@@ -198,7 +229,7 @@ export default function ImageViewPage() {
 
         <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
           <img
-            src={imageInfo.apiUrl}
+            src={imageInfo.url}
             alt={imageInfo.filename}
             style={{
               maxWidth: '100%',
@@ -208,7 +239,13 @@ export default function ImageViewPage() {
               boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
             }}
             onError={(e) => {
-              setError('Failed to load image');
+              console.error('Image load error:', e);
+              // Try fallback to API URL
+              if (imageInfo.url !== imageInfo.apiUrl) {
+                (e.target as HTMLImageElement).src = imageInfo.apiUrl;
+              } else {
+                setError('Failed to load image');
+              }
             }}
           />
         </div>
