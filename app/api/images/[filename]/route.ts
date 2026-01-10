@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { head } from '@vercel/blob';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 const IS_VERCEL = process.env.VERCEL === '1';
@@ -31,30 +30,47 @@ export async function GET(
       'application/octet-stream';
 
     if (IS_VERCEL) {
+      // On Vercel, use list to find the blob and get its URL
       try {
-        // Check if blob exists and get its URL
-        const blob = await head(filename);
-        // Redirect to the blob URL
-        return NextResponse.redirect(blob.url, 307);
+        const { list } = await import('@vercel/blob');
+        const { blobs } = await list();
+        const blob = blobs.find(b => b.pathname.endsWith(filename));
+        
+        if (blob && blob.url) {
+          // Fetch the blob content
+          const response = await fetch(blob.url);
+          if (response.ok) {
+            const blobData = await response.blob();
+            return new NextResponse(blobData, {
+              headers: {
+                'Content-Type': contentType,
+                'Cache-Control': 'public, max-age=31536000, immutable',
+              },
+            });
+          }
+        }
+        return NextResponse.json({ error: 'File not found' }, { status: 404 });
       } catch (error) {
+        console.error('Error fetching blob:', error);
         return NextResponse.json({ error: 'File not found' }, { status: 404 });
       }
-    } else {
-      const filePath = path.join(UPLOAD_DIR, filename);
-
-      if (!existsSync(filePath)) {
-        return NextResponse.json({ error: 'File not found' }, { status: 404 });
-      }
-
-      const fileBuffer = await readFile(filePath);
-      
-      return new NextResponse(fileBuffer, {
-        headers: {
-          'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=31536000, immutable',
-        },
-      });
     }
+
+    // Local file system
+    const filePath = path.join(UPLOAD_DIR, filename);
+
+    if (!existsSync(filePath)) {
+      return NextResponse.json({ error: 'File not found' }, { status: 404 });
+    }
+
+    const fileBuffer = await readFile(filePath);
+    
+    return new NextResponse(fileBuffer, {
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      },
+    });
   } catch (error) {
     console.error('Error serving image:', error);
     return NextResponse.json(
