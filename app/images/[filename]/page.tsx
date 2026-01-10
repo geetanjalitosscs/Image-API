@@ -28,8 +28,13 @@ export default function ImageViewPage() {
         const data = await response.json();
 
         if (response.ok) {
-          const imageUrls = data.images.map((url: string) => {
-            return url.split('/').pop() || '';
+          // Handle new JSON format with images array of objects
+          const imageUrls = data.images.map((item: any) => {
+            if (typeof item === 'string') {
+              return item.split('/').pop() || '';
+            }
+            // Extract filename from URL
+            return item.url ? item.url.split('/').pop()?.split('?')[0] || '' : '';
           });
           setAllImages(imageUrls);
           

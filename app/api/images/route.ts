@@ -47,16 +47,15 @@ export async function GET() {
               null;
             // Return complete image data
             return {
-              filename: filename,
-              apiUrl: `/api/images/${filename}`,
-              directUrl: blob.url,
-              pathname: blob.pathname,
+              url: blob.url,
+              title: filename.replace(ext, '').replace(/_/g, ' ').trim() || 'Untitled Image',
+              description: `Image uploaded on ${new Date((blob as any).uploadedAt || Date.now()).toLocaleDateString()}`,
               size: (blob as any).size || null,
               uploadedAt: (blob as any).uploadedAt || null,
               contentType: contentType
             };
           })
-          .sort((a, b) => a.filename.localeCompare(b.filename));
+          .sort((a, b) => a.title.localeCompare(b.title));
         
         console.log('Image files:', imageFiles);
         return NextResponse.json({ 
@@ -88,17 +87,22 @@ export async function GET() {
         .map(file => {
           const filePath = path.join(UPLOAD_DIR, file);
           const stats = existsSync(filePath) ? require('fs').statSync(filePath) : null;
+          const ext = path.extname(file).toLowerCase();
+          const contentType = 
+            ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+            ext === '.png' ? 'image/png' :
+            ext === '.webp' ? 'image/webp' :
+            null;
           return {
-            filename: file,
-            apiUrl: `/api/images/${file}`,
-            directUrl: `/api/images/${file}`,
-            pathname: `/uploads/${file}`,
+            url: `/api/images/${file}`,
+            title: file.replace(ext, '').replace(/_/g, ' ').trim() || 'Untitled Image',
+            description: stats ? `Image uploaded on ${new Date(stats.mtime).toLocaleDateString()}` : 'Image',
             size: stats ? stats.size : null,
             uploadedAt: stats ? stats.mtime.toISOString() : null,
-            contentType: null
+            contentType: contentType
           };
         })
-        .sort((a, b) => a.filename.localeCompare(b.filename));
+        .sort((a, b) => a.title.localeCompare(b.title));
 
       return NextResponse.json({ 
         success: true,

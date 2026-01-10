@@ -22,18 +22,16 @@ export default function ImagesPage() {
         // Handle new JSON format with images array
         let imageData: ImageData[];
         if (data.images && Array.isArray(data.images)) {
-          imageData = data.images.map((item: any) => ({
-            url: item.directUrl || item.apiUrl || `/api/images/${item.filename}`,
-            filename: item.filename || item.apiUrl?.split('/').pop() || '',
-          }));
-        } else if (data.imagesWithUrls && Array.isArray(data.imagesWithUrls)) {
-          // Fallback for old format
-          imageData = data.imagesWithUrls.map((item: any) => ({
-            url: item.directUrl || item.apiUrl,
-            filename: item.filename || item.apiUrl.split('/').pop() || '',
-          }));
+          imageData = data.images.map((item: any) => {
+            // Extract filename from URL if needed
+            const filename = item.url ? item.url.split('/').pop()?.split('?')[0] || '' : '';
+            return {
+              url: item.url || '',
+              filename: filename,
+            };
+          });
         } else {
-          // Fallback for very old format
+          // Fallback for old format
           imageData = (data.images || []).map((url: string) => {
             const filename = url.split('/').pop() || '';
             return {
