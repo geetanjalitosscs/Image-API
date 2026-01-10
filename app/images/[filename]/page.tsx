@@ -7,6 +7,11 @@ interface ImageInfo {
   filename: string;
   url: string;
   apiUrl: string;
+  title: string;
+  description: string;
+  size: number | null;
+  uploadedAt: string | null;
+  contentType: string | null;
 }
 
 export default function ImageViewPage() {
@@ -37,22 +42,27 @@ export default function ImageViewPage() {
                 url: item
               };
             }
-            // Extract filename from URL - handle both blob URLs and API URLs
+            // Use filename from API response, or extract from URL as fallback
             const url = item.url || '';
-            let extractedFilename = '';
-            if (url.includes('blob.vercel-storage.com')) {
-              // Vercel blob URL - extract the actual filename
-              const urlParts = url.split('/');
-              const lastPart = urlParts[urlParts.length - 1]?.split('?')[0] || '';
-              // Remove Vercel blob suffix if present (format: filename-randomSuffix.ext)
-              extractedFilename = lastPart;
-            } else {
-              // API URL format
-              extractedFilename = url.split('/').pop()?.split('?')[0] || '';
+            let extractedFilename = item.filename || '';
+            if (!extractedFilename) {
+              if (url.includes('blob.vercel-storage.com')) {
+                // Vercel blob URL - extract the actual filename
+                const urlParts = url.split('/');
+                extractedFilename = urlParts[urlParts.length - 1]?.split('?')[0] || '';
+              } else {
+                // API URL format
+                extractedFilename = url.split('/').pop()?.split('?')[0] || '';
+              }
             }
             return {
               filename: extractedFilename,
-              url: url
+              url: url,
+              title: item.title || '',
+              description: item.description || '',
+              size: item.size || null,
+              uploadedAt: item.uploadedAt || null,
+              contentType: item.contentType || null,
             };
           });
           
@@ -80,6 +90,11 @@ export default function ImageViewPage() {
             filename: matchedImage.filename,
             url: matchedImage.url,
             apiUrl: `/api/images/${matchedImage.filename}`,
+            title: matchedImage.title || '',
+            description: matchedImage.description || '',
+            size: matchedImage.size || null,
+            uploadedAt: matchedImage.uploadedAt || null,
+            contentType: matchedImage.contentType || null,
           });
           setError(null);
         } else {

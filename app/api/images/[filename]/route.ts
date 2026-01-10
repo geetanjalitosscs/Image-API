@@ -49,38 +49,75 @@ export async function GET(
         
         // Decode URL-encoded filename
         const decodedFilename = decodeURIComponent(filename);
+        const normalizedRequest = decodedFilename.toLowerCase();
         
-        // Try to find blob by multiple matching strategies
-        const blob: any = allBlobs.find((b: any) => {
+        // Try exact match first (fastest) - case sensitive
+        let blob: any = allBlobs.find((b: any) => {
           const blobFilename = b.pathname.split('/').pop() || b.pathname;
-          
-          // Extract base name (everything before last hyphen, which is Vercel suffix)
-          const blobParts = blobFilename.split('-');
-          const blobBaseName = blobParts.length > 1 
-            ? blobParts.slice(0, -1).join('-') 
-            : blobFilename.split('.')[0];
-          
+          return blobFilename === decodedFilename || blobFilename === filename;
+        });
+        
+        // If exact match not found, try case-insensitive exact match
+        if (!blob) {
+          blob = allBlobs.find((b: any) => {
+            const blobFilename = b.pathname.split('/').pop() || b.pathname;
+            return blobFilename.toLowerCase() === normalizedRequest;
+          });
+        }
+        
+        // If still not found, try multiple matching strategies
+        if (!blob) {
+          // Strategy 1: Match by base name (everything before last hyphen)
           const requestParts = decodedFilename.split('-');
           const requestBaseName = requestParts.length > 1 
             ? requestParts.slice(0, -1).join('-') 
             : decodedFilename.split('.')[0];
+          const normalizedBaseName = requestBaseName.toLowerCase();
           
-          // Multiple matching strategies
-          return blobFilename === decodedFilename ||  // Exact match
-                 blobFilename === filename ||  // Original encoded match
-                 blobBaseName === requestBaseName ||  // Base name match (before Vercel suffix)
-                 blobFilename.includes(decodedFilename) ||  // Contains match
-                 decodedFilename.includes(blobBaseName) ||  // Reverse contains
-                 blobBaseName.includes(requestBaseName) ||  // Base contains
-                 requestBaseName.includes(blobBaseName) ||  // Reverse base contains
-                 blob.pathname.endsWith(decodedFilename) ||  // Pathname ends with
-                 blob.pathname.endsWith(filename);  // Original encoded ends with
-        });
+          blob = allBlobs.find((b: any) => {
+            const blobFilename = b.pathname.split('/').pop() || b.pathname;
+            const blobParts = blobFilename.split('-');
+            const blobBaseName = blobParts.length > 1 
+              ? blobParts.slice(0, -1).join('-') 
+              : blobFilename.split('.')[0];
+            
+            return blobBaseName === requestBaseName ||
+                   blobBaseName.toLowerCase() === normalizedBaseName;
+          });
+        }
+        
+        // Strategy 2: Contains match (if base name match didn't work)
+        if (!blob) {
+          const requestBaseName = decodedFilename.split('.')[0]; // Everything before extension
+          blob = allBlobs.find((b: any) => {
+            const blobFilename = b.pathname.split('/').pop() || b.pathname;
+            const blobBaseName = blobFilename.split('.')[0];
+            // Check if either contains the other (handles partial matches)
+            return blobBaseName.includes(requestBaseName) ||
+                   requestBaseName.includes(blobBaseName) ||
+                   blobFilename.includes(decodedFilename) ||
+                   decodedFilename.includes(blobFilename);
+          });
+        }
+        
+        // Strategy 3: Pathname ends with (last resort)
+        if (!blob) {
+          blob = allBlobs.find((b: any) => {
+            return b.pathname.endsWith(decodedFilename) ||
+                   b.pathname.endsWith(filename);
+          });
+        }
         
         console.log(`Looking for filename: ${filename} (decoded: ${decodedFilename})`);
         console.log(`Total blobs searched: ${allBlobs.length}`);
         if (allBlobs.length > 0) {
-          console.log(`Sample blob filenames:`, allBlobs.slice(0, 5).map(b => b.pathname.split('/').pop()));
+          const sampleFilenames = allBlobs.slice(0, 10).map(b => b.pathname.split('/').pop());
+          console.log(`Sample blob filenames:`, sampleFilenames);
+          // Check if any sample matches
+          const matchingSample = sampleFilenames.find(f => f && (f.includes(decodedFilename) || decodedFilename.includes(f?.split('-')[0] || '')));
+          if (matchingSample) {
+            console.log(`Potential match found in samples: ${matchingSample}`);
+          }
         }
         console.log(`Found blob:`, blob ? { pathname: blob.pathname, url: blob.url } : 'Not found');
         

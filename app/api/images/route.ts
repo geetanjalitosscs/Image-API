@@ -60,6 +60,7 @@ export async function GET() {
               null;
             // Return complete image data
             return {
+              filename: filename, // Add filename for API URL construction
               url: blob.url,
               title: filename.replace(ext, '').replace(/_/g, ' ').trim() || 'Untitled Image',
               description: `Image uploaded on ${new Date((blob as any).uploadedAt || Date.now()).toLocaleDateString()}`,
@@ -113,6 +114,7 @@ export async function GET() {
             ext === '.webp' ? 'image/webp' :
             null;
           return {
+            filename: file, // Add filename for API URL construction
             url: `/api/images/${file}`,
             title: file.replace(ext, '').replace(/_/g, ' ').trim() || 'Untitled Image',
             description: stats ? `Image uploaded on ${new Date(stats.mtime).toLocaleDateString()}` : 'Image',

@@ -48,10 +48,66 @@ export async function GET(
           cursor = result.cursor;
         } while (cursor);
         
-        const blob = allBlobs.find(b => {
+        // Decode URL-encoded filename
+        const decodedFilename = decodeURIComponent(filename);
+        const normalizedRequest = decodedFilename.toLowerCase();
+        
+        // Try exact match first (fastest) - case sensitive
+        let blob: any = allBlobs.find((b: any) => {
           const blobFilename = b.pathname.split('/').pop() || b.pathname;
-          return blobFilename === filename || b.pathname.endsWith(filename);
+          return blobFilename === decodedFilename || blobFilename === filename;
         });
+        
+        // If exact match not found, try case-insensitive exact match
+        if (!blob) {
+          blob = allBlobs.find((b: any) => {
+            const blobFilename = b.pathname.split('/').pop() || b.pathname;
+            return blobFilename.toLowerCase() === normalizedRequest;
+          });
+        }
+        
+        // If still not found, try multiple matching strategies
+        if (!blob) {
+          // Strategy 1: Match by base name (everything before last hyphen)
+          const requestParts = decodedFilename.split('-');
+          const requestBaseName = requestParts.length > 1 
+            ? requestParts.slice(0, -1).join('-') 
+            : decodedFilename.split('.')[0];
+          const normalizedBaseName = requestBaseName.toLowerCase();
+          
+          blob = allBlobs.find((b: any) => {
+            const blobFilename = b.pathname.split('/').pop() || b.pathname;
+            const blobParts = blobFilename.split('-');
+            const blobBaseName = blobParts.length > 1 
+              ? blobParts.slice(0, -1).join('-') 
+              : blobFilename.split('.')[0];
+            
+            return blobBaseName === requestBaseName ||
+                   blobBaseName.toLowerCase() === normalizedBaseName;
+          });
+        }
+        
+        // Strategy 2: Contains match (if base name match didn't work)
+        if (!blob) {
+          const requestBaseName = decodedFilename.split('.')[0]; // Everything before extension
+          blob = allBlobs.find((b: any) => {
+            const blobFilename = b.pathname.split('/').pop() || b.pathname;
+            const blobBaseName = blobFilename.split('.')[0];
+            // Check if either contains the other (handles partial matches)
+            return blobBaseName.includes(requestBaseName) ||
+                   requestBaseName.includes(blobBaseName) ||
+                   blobFilename.includes(decodedFilename) ||
+                   decodedFilename.includes(blobFilename);
+          });
+        }
+        
+        // Strategy 3: Pathname ends with (last resort)
+        if (!blob) {
+          blob = allBlobs.find((b: any) => {
+            return b.pathname.endsWith(decodedFilename) ||
+                   b.pathname.endsWith(filename);
+          });
+        }
         
         if (!blob) {
           return NextResponse.json({ error: 'File not found' }, { status: 404 });

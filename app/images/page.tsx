@@ -5,6 +5,8 @@ import { useState, useEffect } from 'react';
 interface ImageData {
   url: string;
   filename: string;
+  title: string;
+  description: string;
 }
 
 export default function ImagesPage() {
@@ -29,11 +31,13 @@ export default function ImagesPage() {
         let imageData: ImageData[];
         if (data.images && Array.isArray(data.images)) {
           imageData = data.images.map((item: any) => {
-            // Extract filename from URL if needed
-            const filename = item.url ? item.url.split('/').pop()?.split('?')[0] || '' : '';
+            // Use filename from API response, or extract from URL as fallback
+            const filename = item.filename || (item.url ? item.url.split('/').pop()?.split('?')[0] || '' : '');
             return {
               url: item.url || '',
               filename: filename,
+              title: item.title || '',
+              description: item.description || '',
             };
           });
         } else {
@@ -43,6 +47,8 @@ export default function ImagesPage() {
             return {
               url: `/api/images/${filename}`,
               filename: filename,
+              title: '',
+              description: '',
             };
           });
         }
