@@ -19,7 +19,11 @@ export async function GET() {
     if (IS_VERCEL) {
       if (!process.env.BLOB_READ_WRITE_TOKEN) {
         console.warn('BLOB_READ_WRITE_TOKEN not configured, returning empty list');
-        return NextResponse.json({ images: [] });
+        return NextResponse.json({ 
+          success: true,
+          count: 0,
+          images: [] 
+        });
       }
       try {
         const { blobs } = await list();
@@ -34,39 +38,66 @@ export async function GET() {
           .map(blob => {
             // Extract filename from pathname (handle both /filename and filename formats)
             const filename = blob.pathname.split('/').pop() || blob.pathname;
-            // Return both API path and direct blob URL
+            // Return complete image data
             return {
+              filename: filename,
               apiUrl: `/api/images/${filename}`,
               directUrl: blob.url,
-              filename: filename
+              pathname: blob.pathname,
+              size: blob.size || null,
+              uploadedAt: blob.uploadedAt || null,
+              contentType: blob.contentType || null
             };
           })
           .sort((a, b) => a.filename.localeCompare(b.filename));
         
-        // Return both formats for compatibility
-        return NextResponse.json({ 
-          images: imageFiles.map(img => img.apiUrl),
-          imagesWithUrls: imageFiles 
-        });
-        
         console.log('Image files:', imageFiles);
-        return NextResponse.json({ images: imageFiles });
+        return NextResponse.json({ 
+          success: true,
+          count: imageFiles.length,
+          images: imageFiles
+        });
       } catch (error) {
         console.error('Error listing blobs:', error);
-        return NextResponse.json({ images: [] });
+        return NextResponse.json({ 
+          success: false,
+          count: 0,
+          images: [],
+          error: 'Failed to list images'
+        });
       }
     } else {
       if (!existsSync(UPLOAD_DIR)) {
-        return NextResponse.json({ images: [] });
+        return NextResponse.json({ 
+          success: true,
+          count: 0,
+          images: [] 
+        });
       }
 
       const files = await readdir(UPLOAD_DIR);
       const imageFiles = files
         .filter(file => isValidImageFile(file))
-        .map(file => `/api/images/${file}`)
-        .sort();
+        .map(file => {
+          const filePath = path.join(UPLOAD_DIR, file);
+          const stats = existsSync(filePath) ? require('fs').statSync(filePath) : null;
+          return {
+            filename: file,
+            apiUrl: `/api/images/${file}`,
+            directUrl: `/api/images/${file}`,
+            pathname: `/uploads/${file}`,
+            size: stats ? stats.size : null,
+            uploadedAt: stats ? stats.mtime.toISOString() : null,
+            contentType: null
+          };
+        })
+        .sort((a, b) => a.filename.localeCompare(b.filename));
 
-      return NextResponse.json({ images: imageFiles });
+      return NextResponse.json({ 
+        success: true,
+        count: imageFiles.length,
+        images: imageFiles
+      });
     }
   } catch (error) {
     console.error('Error reading images:', error);

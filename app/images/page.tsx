@@ -19,15 +19,22 @@ export default function ImagesPage() {
       const data = await response.json();
 
       if (response.ok) {
-        // Use imagesWithUrls if available (Vercel Blob), otherwise use images array
+        // Handle new JSON format with images array
         let imageData: ImageData[];
-        if (data.imagesWithUrls && Array.isArray(data.imagesWithUrls)) {
+        if (data.images && Array.isArray(data.images)) {
+          imageData = data.images.map((item: any) => ({
+            url: item.directUrl || item.apiUrl || `/api/images/${item.filename}`,
+            filename: item.filename || item.apiUrl?.split('/').pop() || '',
+          }));
+        } else if (data.imagesWithUrls && Array.isArray(data.imagesWithUrls)) {
+          // Fallback for old format
           imageData = data.imagesWithUrls.map((item: any) => ({
             url: item.directUrl || item.apiUrl,
             filename: item.filename || item.apiUrl.split('/').pop() || '',
           }));
         } else {
-          imageData = data.images.map((url: string) => {
+          // Fallback for very old format
+          imageData = (data.images || []).map((url: string) => {
             const filename = url.split('/').pop() || '';
             return {
               url: `/api/images/${filename}`,
