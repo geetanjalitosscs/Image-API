@@ -60,11 +60,10 @@ export async function POST(request: NextRequest) {
 
       try {
         const bytes = await file.arrayBuffer();
-        const buffer = Buffer.from(bytes);
         const uniqueFilename = generateUniqueFilename(file.name);
 
         if (IS_VERCEL) {
-          const blob = await put(uniqueFilename, buffer, {
+          const blob = await put(uniqueFilename, bytes, {
             access: 'public',
             contentType: file.type,
           });
@@ -73,6 +72,7 @@ export async function POST(request: NextRequest) {
           if (!existsSync(UPLOAD_DIR)) {
             await mkdir(UPLOAD_DIR, { recursive: true });
           }
+          const buffer = Buffer.from(bytes);
           const filePath = path.join(UPLOAD_DIR, uniqueFilename);
           await writeFile(filePath, buffer);
           uploadedFiles.push(uniqueFilename);
