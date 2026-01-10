@@ -82,11 +82,21 @@ export async function POST(request: NextRequest) {
         const uniqueFilename = generateUniqueFilename(file.name);
 
         if (IS_VERCEL) {
-          const blob = await put(uniqueFilename, bytes, {
-            access: 'public',
-            contentType: file.type,
-          });
-          uploadedFiles.push(blob.pathname.split('/').pop() || uniqueFilename);
+          if (!process.env.BLOB_READ_WRITE_TOKEN) {
+            errors.push(`${file.name}: Vercel Blob storage not configured. Please set BLOB_READ_WRITE_TOKEN environment variable in Vercel project settings.`);
+            continue;
+          }
+          try {
+            const blob = await put(uniqueFilename, bytes, {
+              access: 'public',
+              contentType: file.type,
+            });
+            uploadedFiles.push(blob.pathname.split('/').pop() || uniqueFilename);
+          } catch (blobError) {
+            const errorMsg = blobError instanceof Error ? blobError.message : String(blobError);
+            console.error(`Vercel Blob error for ${file.name}:`, errorMsg);
+            errors.push(`${file.name}: Failed to upload to Vercel Blob - ${errorMsg}`);
+          }
         } else {
           if (!existsSync(UPLOAD_DIR)) {
             await mkdir(UPLOAD_DIR, { recursive: true });

@@ -30,6 +30,9 @@ export async function GET(
       'application/octet-stream';
 
     if (IS_VERCEL) {
+      if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        return NextResponse.json({ error: 'Blob storage not configured' }, { status: 503 });
+      }
       // On Vercel, use list to find the blob and get its URL
       try {
         const { list } = await import('@vercel/blob');

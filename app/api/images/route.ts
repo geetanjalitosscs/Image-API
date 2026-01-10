@@ -17,16 +17,25 @@ function isValidImageFile(filename: string): boolean {
 export async function GET() {
   try {
     if (IS_VERCEL) {
-      const { blobs } = await list();
-      const imageFiles = blobs
-        .filter(blob => {
-          const ext = path.extname(blob.pathname).toLowerCase();
-          return ALLOWED_EXTENSIONS.includes(ext);
-        })
-        .map(blob => `/api/images/${blob.pathname.split('/').pop()}`)
-        .sort();
-      
-      return NextResponse.json({ images: imageFiles });
+      if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        console.warn('BLOB_READ_WRITE_TOKEN not configured, returning empty list');
+        return NextResponse.json({ images: [] });
+      }
+      try {
+        const { blobs } = await list();
+        const imageFiles = blobs
+          .filter(blob => {
+            const ext = path.extname(blob.pathname).toLowerCase();
+            return ALLOWED_EXTENSIONS.includes(ext);
+          })
+          .map(blob => `/api/images/${blob.pathname.split('/').pop()}`)
+          .sort();
+        
+        return NextResponse.json({ images: imageFiles });
+      } catch (error) {
+        console.error('Error listing blobs:', error);
+        return NextResponse.json({ images: [] });
+      }
     } else {
       if (!existsSync(UPLOAD_DIR)) {
         return NextResponse.json({ images: [] });
