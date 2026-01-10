@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
+import { get } from '@vercel/blob';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
+const IS_VERCEL = process.env.VERCEL === '1';
 const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
 export async function GET(
@@ -22,26 +24,41 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
     }
 
-    const filePath = path.join(UPLOAD_DIR, filename);
-
-    if (!existsSync(filePath)) {
-      return NextResponse.json({ error: 'File not found' }, { status: 404 });
-    }
-
-    const fileBuffer = await readFile(filePath);
-    
     const contentType = 
       ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
       ext === '.png' ? 'image/png' :
       ext === '.webp' ? 'image/webp' :
       'application/octet-stream';
 
-    return new NextResponse(fileBuffer, {
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=31536000, immutable',
-      },
-    });
+    if (IS_VERCEL) {
+      try {
+        const blob = await get(filename);
+        const response = new NextResponse(blob, {
+          headers: {
+            'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=31536000, immutable',
+          },
+        });
+        return response;
+      } catch (error) {
+        return NextResponse.json({ error: 'File not found' }, { status: 404 });
+      }
+    } else {
+      const filePath = path.join(UPLOAD_DIR, filename);
+
+      if (!existsSync(filePath)) {
+        return NextResponse.json({ error: 'File not found' }, { status: 404 });
+      }
+
+      const fileBuffer = await readFile(filePath);
+      
+      return new NextResponse(fileBuffer, {
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=31536000, immutable',
+        },
+      });
+    }
   } catch (error) {
     console.error('Error serving image:', error);
     return NextResponse.json(
@@ -50,4 +67,3 @@ export async function GET(
     );
   }
 }
-

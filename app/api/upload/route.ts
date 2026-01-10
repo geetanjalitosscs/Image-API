@@ -3,10 +3,12 @@ import { writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { randomBytes } from 'crypto';
+import { put } from '@vercel/blob';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
+const IS_VERCEL = process.env.VERCEL === '1';
 
 function sanitizeFilename(filename: string): string {
   return filename
@@ -25,10 +27,6 @@ function generateUniqueFilename(originalName: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    if (!existsSync(UPLOAD_DIR)) {
-      await mkdir(UPLOAD_DIR, { recursive: true });
-    }
-
     const formData = await request.formData();
     const files = formData.getAll('images') as File[];
 
@@ -64,11 +62,23 @@ export async function POST(request: NextRequest) {
         const bytes = await file.arrayBuffer();
         const buffer = Buffer.from(bytes);
         const uniqueFilename = generateUniqueFilename(file.name);
-        const filePath = path.join(UPLOAD_DIR, uniqueFilename);
 
-        await writeFile(filePath, buffer);
-        uploadedFiles.push(uniqueFilename);
+        if (IS_VERCEL) {
+          const blob = await put(uniqueFilename, buffer, {
+            access: 'public',
+            contentType: file.type,
+          });
+          uploadedFiles.push(blob.pathname.split('/').pop() || uniqueFilename);
+        } else {
+          if (!existsSync(UPLOAD_DIR)) {
+            await mkdir(UPLOAD_DIR, { recursive: true });
+          }
+          const filePath = path.join(UPLOAD_DIR, uniqueFilename);
+          await writeFile(filePath, buffer);
+          uploadedFiles.push(uniqueFilename);
+        }
       } catch (error) {
+        console.error(`Error uploading ${file.name}:`, error);
         errors.push(`${file.name}: Failed to save file.`);
       }
     }
@@ -94,4 +104,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
