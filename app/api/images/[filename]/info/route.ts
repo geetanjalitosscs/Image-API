@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readFile } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
+import { list } from '@vercel/blob';
+import { existsSync, statSync } from 'fs';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 const IS_VERCEL = process.env.VERCEL === '1';
 const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET(
   request: NextRequest,
@@ -33,49 +36,43 @@ export async function GET(
       if (!process.env.BLOB_READ_WRITE_TOKEN) {
         return NextResponse.json({ error: 'Blob storage not configured' }, { status: 503 });
       }
-      // On Vercel, use list to find the blob and get its URL
       try {
         const { list } = await import('@vercel/blob');
-        
-        // Fetch all blobs with pagination to find the specific one
         let allBlobs: any[] = [];
         let cursor: string | undefined = undefined;
         
+        // Fetch all blobs to find the specific one
         do {
           const result: { blobs: any[]; cursor?: string } = await list({ limit: 1000, cursor });
           allBlobs = allBlobs.concat(result.blobs);
           cursor = result.cursor;
         } while (cursor);
         
-        // Try to find blob by exact filename match in pathname
         const blob = allBlobs.find(b => {
           const blobFilename = b.pathname.split('/').pop() || b.pathname;
-          // Match exact filename or check if pathname ends with filename
-          return blobFilename === filename || 
-                 blobFilename.includes(filename) || 
-                 filename.includes(blobFilename.split('-')[0]);
+          return blobFilename === filename || b.pathname.endsWith(filename);
         });
         
-        console.log(`Looking for filename: ${filename}`);
-        console.log(`Total blobs searched: ${allBlobs.length}`);
-        console.log(`Found blob:`, blob ? { pathname: blob.pathname, url: blob.url } : 'Not found');
-        
-        if (blob && blob.url) {
-          // Return image directly instead of redirect (works better in Postman)
-          const imageResponse = await fetch(blob.url);
-          if (imageResponse.ok) {
-            const imageBlob = await imageResponse.blob();
-            return new NextResponse(imageBlob, {
-              headers: {
-                'Content-Type': contentType,
-                'Cache-Control': 'public, max-age=31536000, immutable',
-              },
-            });
-          }
+        if (!blob) {
+          return NextResponse.json({ error: 'File not found' }, { status: 404 });
         }
-        return NextResponse.json({ error: 'File not found' }, { status: 404 });
+
+        return NextResponse.json({
+          success: true,
+          filename: filename,
+          url: blob.url,
+          apiUrl: `/api/images/${filename}`,
+          pathname: blob.pathname,
+          size: (blob as any).size || null,
+          uploadedAt: (blob as any).uploadedAt || null,
+          contentType: contentType,
+        }, {
+          headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+          }
+        });
       } catch (error) {
-        console.error('Error fetching blob:', error);
+        console.error('Error fetching blob info:', error);
         return NextResponse.json({ error: 'File not found' }, { status: 404 });
       }
     }
@@ -87,19 +84,28 @@ export async function GET(
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }
 
-    const fileBuffer = await readFile(filePath);
+    const stats = statSync(filePath);
     
-    return new NextResponse(fileBuffer, {
+    return NextResponse.json({
+      success: true,
+      filename: filename,
+      url: `/api/images/${filename}`,
+      apiUrl: `/api/images/${filename}`,
+      pathname: `/uploads/${filename}`,
+      size: stats.size,
+      uploadedAt: stats.mtime.toISOString(),
+      contentType: contentType,
+    }, {
       headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=31536000, immutable',
-      },
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+      }
     });
   } catch (error) {
-    console.error('Error serving image:', error);
+    console.error('Error getting file info:', error);
     return NextResponse.json(
-      { error: 'Failed to serve image' },
+      { error: 'Failed to get file info' },
       { status: 500 }
     );
   }
 }
+
