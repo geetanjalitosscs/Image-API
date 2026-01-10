@@ -47,17 +47,41 @@ export async function GET(
           cursor = result.cursor;
         } while (cursor);
         
-        // Try to find blob by exact filename match in pathname
-        const blob = allBlobs.find(b => {
+        // Decode URL-encoded filename
+        const decodedFilename = decodeURIComponent(filename);
+        
+        // Try to find blob by multiple matching strategies
+        const blob: any = allBlobs.find((b: any) => {
           const blobFilename = b.pathname.split('/').pop() || b.pathname;
-          // Match exact filename or check if pathname ends with filename
-          return blobFilename === filename || 
-                 blobFilename.includes(filename) || 
-                 filename.includes(blobFilename.split('-')[0]);
+          
+          // Extract base name (everything before last hyphen, which is Vercel suffix)
+          const blobParts = blobFilename.split('-');
+          const blobBaseName = blobParts.length > 1 
+            ? blobParts.slice(0, -1).join('-') 
+            : blobFilename.split('.')[0];
+          
+          const requestParts = decodedFilename.split('-');
+          const requestBaseName = requestParts.length > 1 
+            ? requestParts.slice(0, -1).join('-') 
+            : decodedFilename.split('.')[0];
+          
+          // Multiple matching strategies
+          return blobFilename === decodedFilename ||  // Exact match
+                 blobFilename === filename ||  // Original encoded match
+                 blobBaseName === requestBaseName ||  // Base name match (before Vercel suffix)
+                 blobFilename.includes(decodedFilename) ||  // Contains match
+                 decodedFilename.includes(blobBaseName) ||  // Reverse contains
+                 blobBaseName.includes(requestBaseName) ||  // Base contains
+                 requestBaseName.includes(blobBaseName) ||  // Reverse base contains
+                 blob.pathname.endsWith(decodedFilename) ||  // Pathname ends with
+                 blob.pathname.endsWith(filename);  // Original encoded ends with
         });
         
-        console.log(`Looking for filename: ${filename}`);
+        console.log(`Looking for filename: ${filename} (decoded: ${decodedFilename})`);
         console.log(`Total blobs searched: ${allBlobs.length}`);
+        if (allBlobs.length > 0) {
+          console.log(`Sample blob filenames:`, allBlobs.slice(0, 5).map(b => b.pathname.split('/').pop()));
+        }
         console.log(`Found blob:`, blob ? { pathname: blob.pathname, url: blob.url } : 'Not found');
         
         if (blob && blob.url) {
