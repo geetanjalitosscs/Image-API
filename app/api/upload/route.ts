@@ -183,17 +183,15 @@ export async function POST(request: NextRequest) {
             const savedFilename = uniqueFilename;
             const productImageUrl = getProductImageUrl(savedFilename, request);
             
-            // Save metadata if product URL is provided
-            if (productUrl && productUrl.trim()) {
-              const metadata = await loadMetadata();
-              metadata[savedFilename] = {
-                filename: savedFilename,
-                productUrl: productUrl.trim(),
-                productName: productName,
-                productDescription: productDescription
-              };
-              await saveMetadata(metadata);
-            }
+            // Always save metadata (even without productUrl) so we can match by productName later
+            const metadata = await loadMetadata();
+            metadata[savedFilename] = {
+              filename: savedFilename,
+              productUrl: productUrl && productUrl.trim() ? productUrl.trim() : undefined,
+              productName: productName,
+              productDescription: productDescription
+            };
+            await saveMetadata(metadata);
             
             uploadedFiles.push({
               filename: savedFilename,
@@ -216,17 +214,15 @@ export async function POST(request: NextRequest) {
           await writeFile(filePath, buffer);
           const productImageUrl = getProductImageUrl(uniqueFilename, request);
           
-          // Save metadata if product URL is provided
-          if (productUrl && productUrl.trim()) {
-            const metadata = await loadMetadata();
-            metadata[uniqueFilename] = {
-              filename: uniqueFilename,
-              productUrl: productUrl.trim(),
-              productName: productName,
-              productDescription: productDescription
-            };
-            await saveMetadata(metadata);
-          }
+          // Always save metadata (even without productUrl) so we can match by productName later
+          const metadata = await loadMetadata();
+          metadata[uniqueFilename] = {
+            filename: uniqueFilename,
+            productUrl: productUrl && productUrl.trim() ? productUrl.trim() : undefined,
+            productName: productName,
+            productDescription: productDescription
+          };
+          await saveMetadata(metadata);
           
           uploadedFiles.push({
             filename: uniqueFilename,

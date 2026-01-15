@@ -180,12 +180,24 @@ export async function GET(request: NextRequest) {
             // If still no productUrl, try to find it by matching productName in all metadata
             let productUrl = fileMetadata.productUrl || null;
             if (!productUrl && productName) {
-              // Search all metadata entries for matching productName
-              const matchingEntry = Object.values(metadata).find(entry => 
+              // First try exact match
+              let matchingEntry = Object.values(metadata).find(entry => 
                 entry.productName && 
                 entry.productName.toLowerCase().trim() === productName.toLowerCase().trim() &&
                 entry.productUrl
               );
+              
+              // If no exact match, try partial match (check if productName contains key words)
+              if (!matchingEntry) {
+                const productNameWords = productName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+                matchingEntry = Object.values(metadata).find(entry => {
+                  if (!entry.productName || !entry.productUrl) return false;
+                  const entryWords = entry.productName.toLowerCase().split(/\s+/);
+                  // Check if at least 2 key words match
+                  const matchingWords = productNameWords.filter(w => entryWords.some(ew => ew.includes(w) || w.includes(ew)));
+                  return matchingWords.length >= 2;
+                });
+              }
               
               if (matchingEntry?.productUrl) {
                 productUrl = matchingEntry.productUrl;
@@ -319,12 +331,24 @@ export async function GET(request: NextRequest) {
           // If still no productUrl, try to find it by matching productName in all metadata
           let productUrl = fileMetadata.productUrl || null;
           if (!productUrl && productName) {
-            // Search all metadata entries for matching productName
-            const matchingEntry = Object.values(metadata).find(entry => 
+            // First try exact match
+            let matchingEntry = Object.values(metadata).find(entry => 
               entry.productName && 
               entry.productName.toLowerCase().trim() === productName.toLowerCase().trim() &&
               entry.productUrl
             );
+            
+            // If no exact match, try partial match (check if productName contains key words)
+            if (!matchingEntry) {
+              const productNameWords = productName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+              matchingEntry = Object.values(metadata).find(entry => {
+                if (!entry.productName || !entry.productUrl) return false;
+                const entryWords = entry.productName.toLowerCase().split(/\s+/);
+                // Check if at least 2 key words match
+                const matchingWords = productNameWords.filter(w => entryWords.some(ew => ew.includes(w) || w.includes(ew)));
+                return matchingWords.length >= 2;
+              });
+            }
             
             if (matchingEntry?.productUrl) {
               productUrl = matchingEntry.productUrl;
