@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readdir, readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { list } from '@vercel/blob';
+import { list, put, head } from '@vercel/blob';
 
 interface ImageMetadata {
   filename: string;
@@ -12,6 +12,7 @@ interface ImageMetadata {
 }
 
 const METADATA_FILE = path.join(process.cwd(), 'public', 'uploads', 'metadata.json');
+const METADATA_BLOB_NAME = 'metadata.json'; // Name for metadata in Vercel Blob Storage
 
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 const IS_VERCEL = process.env.VERCEL === '1';
@@ -59,9 +60,40 @@ function getProductImageUrl(filename: string, request?: NextRequest): string {
 
 async function loadMetadata(): Promise<Record<string, ImageMetadata>> {
   try {
-    if (existsSync(METADATA_FILE)) {
-      const content = await readFile(METADATA_FILE, 'utf-8');
-      return JSON.parse(content);
+    if (IS_VERCEL) {
+      // On Vercel, load from Blob Storage
+      if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        console.warn('BLOB_READ_WRITE_TOKEN not configured, returning empty metadata');
+        return {};
+      }
+      try {
+        // Try to get the metadata blob - use list to find it
+        const { list } = await import('@vercel/blob');
+        const blobs = await list({ prefix: METADATA_BLOB_NAME, limit: 10 });
+        // Find exact match (metadata.json) or first match
+        const metadataBlob = blobs.blobs.find(b => 
+          b.pathname === METADATA_BLOB_NAME || 
+          b.pathname.endsWith('/' + METADATA_BLOB_NAME) ||
+          b.pathname === METADATA_BLOB_NAME
+        ) || blobs.blobs[0];
+        
+        if (metadataBlob) {
+          const response = await fetch(metadataBlob.url);
+          if (response.ok) {
+            const content = await response.text();
+            return JSON.parse(content);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading metadata from blob:', error);
+      }
+      return {};
+    } else {
+      // On local, load from filesystem
+      if (existsSync(METADATA_FILE)) {
+        const content = await readFile(METADATA_FILE, 'utf-8');
+        return JSON.parse(content);
+      }
     }
   } catch (error) {
     console.error('Error loading metadata:', error);
@@ -71,13 +103,32 @@ async function loadMetadata(): Promise<Record<string, ImageMetadata>> {
 
 async function saveMetadata(metadata: Record<string, ImageMetadata>): Promise<void> {
   try {
-    const dir = path.dirname(METADATA_FILE);
-    if (!existsSync(dir)) {
-      await require('fs/promises').mkdir(dir, { recursive: true });
+    if (IS_VERCEL) {
+      // On Vercel, save to Blob Storage
+      if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        console.warn('BLOB_READ_WRITE_TOKEN not configured, cannot save metadata');
+        return;
+      }
+      const metadataJson = JSON.stringify(metadata, null, 2);
+      await put(METADATA_BLOB_NAME, metadataJson, {
+        access: 'public',
+        contentType: 'application/json',
+        addRandomSuffix: false, // Keep the same filename
+      });
+    } else {
+      // On local, save to filesystem
+      const dir = path.dirname(METADATA_FILE);
+      if (!existsSync(dir)) {
+        await import('fs/promises').then(fs => fs.mkdir(dir, { recursive: true }));
+      }
+      await writeFile(METADATA_FILE, JSON.stringify(metadata, null, 2), 'utf-8');
     }
-    await writeFile(METADATA_FILE, JSON.stringify(metadata, null, 2), 'utf-8');
   } catch (error) {
     console.error('Error saving metadata:', error);
+    // Don't throw on Vercel - metadata save failures shouldn't break the API
+    if (!IS_VERCEL) {
+      throw error;
+    }
   }
 }
 
