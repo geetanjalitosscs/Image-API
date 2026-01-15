@@ -13,6 +13,9 @@ export default function ImagesPage() {
   const [images, setImages] = useState<ImageData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const fetchImages = async () => {
     try {
@@ -68,11 +71,159 @@ export default function ImagesPage() {
     fetchImages();
   }, []);
 
+  const handleDelete = async (filename: string) => {
+    if (!confirm('Are you sure you want to delete this image?')) {
+      return;
+    }
+
+    setDeleting(filename);
+    try {
+      const response = await fetch(`/api/images/${filename}`, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Remove from local state
+        setImages(prev => prev.filter(img => img.filename !== filename));
+        setSelectedImages(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(filename);
+          return newSet;
+        });
+        setError(null);
+      } else {
+        setError(data.error || 'Failed to delete image');
+      }
+    } catch (err) {
+      setError('Network error. Please try again.');
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const handleToggleSelect = (filename: string) => {
+    setSelectedImages(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(filename)) {
+        newSet.delete(filename);
+      } else {
+        newSet.add(filename);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedImages.size === images.length) {
+      setSelectedImages(new Set());
+    } else {
+      setSelectedImages(new Set(images.map(img => img.filename)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedImages.size === 0) {
+      setError('Please select at least one image to delete.');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to delete ${selectedImages.size} image(s)?`)) {
+      return;
+    }
+
+    setBulkDeleting(true);
+    setError(null);
+
+    const filenames = Array.from(selectedImages);
+    const deletePromises = filenames.map(filename =>
+      fetch(`/api/images/${filename}`, {
+        method: 'DELETE',
+      }).then(res => res.json())
+    );
+
+    try {
+      const results = await Promise.all(deletePromises);
+      const successful = results.filter(r => r.success);
+      const failed = results.filter(r => !r.success);
+
+      if (successful.length > 0) {
+        // Remove successfully deleted images from state
+        setImages(prev => prev.filter(img => !selectedImages.has(img.filename)));
+        setSelectedImages(new Set());
+      }
+
+      if (failed.length > 0) {
+        setError(`Failed to delete ${failed.length} image(s).`);
+      } else {
+        setError(null);
+      }
+    } catch (err) {
+      setError('Network error. Please try again.');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <h1 style={{ fontSize: '2rem', fontWeight: '600' }}>All Images ({images.length})</h1>
-        <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+          <h1 style={{ fontSize: '2rem', fontWeight: '600', margin: 0 }}>All Images ({images.length})</h1>
+          {selectedImages.size > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                {selectedImages.size} selected
+              </span>
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: bulkDeleting ? '#9ca3af' : '#ef4444',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: bulkDeleting ? 'not-allowed' : 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: '500',
+                }}
+              >
+                {bulkDeleting ? 'Deleting...' : `Delete Selected (${selectedImages.size})`}
+              </button>
+              <button
+                onClick={() => setSelectedImages(new Set())}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: '#6b7280',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                }}
+              >
+                Clear Selection
+              </button>
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            onClick={handleSelectAll}
+            style={{
+              padding: '0.5rem 1rem',
+              background: selectedImages.size === images.length ? '#10b981' : '#6b7280',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '0.875rem',
+            }}
+          >
+            {selectedImages.size === images.length ? 'Deselect All' : 'Select All'}
+          </button>
           <button
             onClick={fetchImages}
             style={{
@@ -82,7 +233,6 @@ export default function ImagesPage() {
               border: 'none',
               borderRadius: '4px',
               cursor: 'pointer',
-              marginRight: '0.5rem',
             }}
           >
             Refresh
@@ -141,20 +291,34 @@ export default function ImagesPage() {
             <div
               key={index}
               style={{
-                border: '1px solid #e0e0e0',
+                border: selectedImages.has(image.filename) ? '2px solid #3b82f6' : '1px solid #e0e0e0',
                 borderRadius: '8px',
                 overflow: 'hidden',
-                background: 'white',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                background: selectedImages.has(image.filename) ? '#eff6ff' : 'white',
+                boxShadow: selectedImages.has(image.filename) ? '0 4px 8px rgba(59, 130, 246, 0.2)' : '0 2px 4px rgba(0,0,0,0.1)',
+                position: 'relative',
               }}
             >
+              <div style={{ position: 'absolute', top: '0.5rem', left: '0.5rem', zIndex: 10 }}>
+                <input
+                  type="checkbox"
+                  checked={selectedImages.has(image.filename)}
+                  onChange={() => handleToggleSelect(image.filename)}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: '1.25rem',
+                    height: '1.25rem',
+                    cursor: 'pointer',
+                  }}
+                />
+              </div>
               <a
                 href={`/images/${image.filename}`}
                 style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
               >
                 <div style={{ position: 'relative', width: '100%', paddingTop: '75%', background: '#f3f4f6', cursor: 'pointer' }}>
                   <img
-                    src={image.url}
+                    src={image.url || `/api/images/${image.filename}`}
                     alt={image.filename}
                     style={{
                       position: 'absolute',
@@ -165,8 +329,20 @@ export default function ImagesPage() {
                       objectFit: 'cover',
                     }}
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src = '/placeholder.png';
+                      const target = e.target as HTMLImageElement;
+                      // Try fallback to API endpoint if blob URL fails
+                      if (image.url && !image.url.includes('/api/images/')) {
+                        target.src = `/api/images/${image.filename}`;
+                      } else {
+                        // Show placeholder or error state
+                        target.style.display = 'none';
+                        const parent = target.parentElement;
+                        if (parent) {
+                          parent.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af; font-size: 0.875rem;">Image not available</div>';
+                        }
+                      }
                     }}
+                    loading="lazy"
                   />
                 </div>
               </a>
@@ -184,7 +360,7 @@ export default function ImagesPage() {
                     ? `${image.filename.substring(0, 30)}...`
                     : image.filename}
                 </p>
-                <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
+                <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   <a
                     href={`/images/${image.filename}`}
                     style={{
@@ -208,6 +384,23 @@ export default function ImagesPage() {
                   >
                     Direct Link
                   </a>
+                  <span style={{ color: '#d1d5db' }}>|</span>
+                  <button
+                    onClick={() => handleDelete(image.filename)}
+                    disabled={deleting === image.filename}
+                    style={{
+                      fontSize: '0.875rem',
+                      color: '#ef4444',
+                      background: 'none',
+                      border: 'none',
+                      cursor: deleting === image.filename ? 'not-allowed' : 'pointer',
+                      padding: 0,
+                      textDecoration: deleting === image.filename ? 'none' : 'underline',
+                      opacity: deleting === image.filename ? 0.6 : 1,
+                    }}
+                  >
+                    {deleting === image.filename ? 'Deleting...' : 'Delete'}
+                  </button>
                 </div>
               </div>
             </div>

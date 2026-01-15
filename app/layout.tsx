@@ -16,13 +16,47 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              // Suppress inject.js errors from browser extensions
-              window.addEventListener('error', function(e) {
-                if (e.message && e.message.includes('inject.js')) {
-                  e.preventDefault();
-                  return false;
-                }
-              }, true);
+              // Suppress errors from browser extensions
+              (function() {
+                var originalError = console.error;
+                console.error = function() {
+                  var args = Array.prototype.slice.call(arguments);
+                  var errorMessage = args.join(' ');
+                  // Suppress errors from browser extensions
+                  if (errorMessage.includes('inject.js') || 
+                      errorMessage.includes('chrome-extension://') ||
+                      errorMessage.includes('moz-extension://') ||
+                      errorMessage.includes('ReferenceError: e is not defined')) {
+                    return;
+                  }
+                  originalError.apply(console, args);
+                };
+                
+                // Suppress unhandled errors from extensions
+                window.addEventListener('error', function(e) {
+                  if (e.filename && (
+                    e.filename.includes('inject.js') ||
+                    e.filename.includes('chrome-extension://') ||
+                    e.filename.includes('moz-extension://')
+                  )) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                  }
+                }, true);
+                
+                // Suppress unhandled promise rejections from extensions
+                window.addEventListener('unhandledrejection', function(e) {
+                  if (e.reason && (
+                    String(e.reason).includes('inject.js') ||
+                    String(e.reason).includes('chrome-extension://') ||
+                    String(e.reason).includes('moz-extension://')
+                  )) {
+                    e.preventDefault();
+                    return false;
+                  }
+                });
+              })();
             `,
           }}
         />

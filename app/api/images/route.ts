@@ -141,6 +141,7 @@ export async function GET(request: NextRequest) {
             
             return {
               filename: filename,
+              url: blob.url, // Add url field for image display
               productName: productName,
               title: title,
               Url: fileMetadata.flipkartUrl || null,
@@ -208,6 +209,7 @@ export async function GET(request: NextRequest) {
           
           return {
             filename: file,
+            url: `/api/images/${file}`, // Add url field for image display
             productName: productName,
             title: title,
             Url: fileMetadata.flipkartUrl || null,

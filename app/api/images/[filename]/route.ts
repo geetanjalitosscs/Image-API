@@ -1,11 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readFile } from 'fs/promises';
+import { readFile, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 const IS_VERCEL = process.env.VERCEL === '1';
 const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+const METADATA_FILE = path.join(process.cwd(), 'public', 'uploads', 'metadata.json');
+
+interface ImageMetadata {
+  filename: string;
+  flipkartUrl?: string;
+  productName?: string;
+  productDescription?: string;
+}
+
+async function loadMetadata(): Promise<Record<string, ImageMetadata>> {
+  try {
+    if (existsSync(METADATA_FILE)) {
+      const content = await readFile(METADATA_FILE, 'utf-8');
+      return JSON.parse(content);
+    }
+  } catch (error) {
+    console.error('Error loading metadata:', error);
+  }
+  return {};
+}
+
+async function saveMetadata(metadata: Record<string, ImageMetadata>): Promise<void> {
+  try {
+    const { writeFile, mkdir } = await import('fs/promises');
+    const dir = path.dirname(METADATA_FILE);
+    if (!existsSync(dir)) {
+      await mkdir(dir, { recursive: true });
+    }
+    await writeFile(METADATA_FILE, JSON.stringify(metadata, null, 2), 'utf-8');
+  } catch (error) {
+    console.error('Error saving metadata:', error);
+  }
+}
 
 export async function GET(
   request: NextRequest,
@@ -160,6 +193,82 @@ export async function GET(
     console.error('Error serving image:', error);
     return NextResponse.json(
       { error: 'Failed to serve image' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { filename: string } }
+) {
+  try {
+    const filename = params.filename;
+    
+    if (!filename) {
+      return NextResponse.json({ error: 'Filename required' }, { status: 400 });
+    }
+
+    const ext = path.extname(filename).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
+    }
+
+    if (IS_VERCEL) {
+      if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        return NextResponse.json({ error: 'Blob storage not configured' }, { status: 503 });
+      }
+      
+      try {
+        // Delete from Vercel Blob Storage
+        const { del } = await import('@vercel/blob');
+        await del(filename);
+        
+        // Remove from metadata
+        const metadata = await loadMetadata();
+        if (metadata[filename]) {
+          delete metadata[filename];
+          await saveMetadata(metadata);
+        }
+        
+        return NextResponse.json({ 
+          success: true, 
+          message: 'Image deleted successfully' 
+        });
+      } catch (error) {
+        console.error('Error deleting blob:', error);
+        return NextResponse.json(
+          { error: 'Failed to delete image' },
+          { status: 500 }
+        );
+      }
+    } else {
+      // Local file system
+      const filePath = path.join(UPLOAD_DIR, filename);
+
+      if (!existsSync(filePath)) {
+        return NextResponse.json({ error: 'File not found' }, { status: 404 });
+      }
+
+      // Delete file
+      await unlink(filePath);
+      
+      // Remove from metadata
+      const metadata = await loadMetadata();
+      if (metadata[filename]) {
+        delete metadata[filename];
+        await saveMetadata(metadata);
+      }
+      
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Image deleted successfully' 
+      });
+    }
+  } catch (error) {
+    console.error('Error deleting image:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete image' },
       { status: 500 }
     );
   }
