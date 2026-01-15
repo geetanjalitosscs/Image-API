@@ -6,7 +6,7 @@ import { list } from '@vercel/blob';
 
 interface ImageMetadata {
   filename: string;
-  flipkartUrl?: string;
+  productUrl?: string;
   productName?: string;
   productDescription?: string;
 }
@@ -131,7 +131,7 @@ export async function GET(request: NextRequest) {
             // Get metadata for this file
             const fileMetadata = metadata[filename] || {};
             
-            // Use Flipkart product name if available, otherwise extract from filename
+            // Use product name if available, otherwise extract from filename
             const productName = fileMetadata.productName || extractProductName(filename);
             const productImageUrl = getProductImageUrl(filename, request);
             
@@ -144,7 +144,7 @@ export async function GET(request: NextRequest) {
               url: blob.url, // Add url field for image display
               productName: productName,
               title: title,
-              Url: fileMetadata.flipkartUrl || null,
+              productUrl: fileMetadata.productUrl || null,
               productImageUrl: productImageUrl,
               description: description,
               uploadedAt: (blob as any).uploadedAt || null,
@@ -209,10 +209,10 @@ export async function GET(request: NextRequest) {
           
           return {
             filename: file,
-            url: `/api/images/${file}`, // Add url field for image display
+            url: `/api/images/${encodeURIComponent(file)}`, // Add url field for image display with proper encoding
             productName: productName,
             title: title,
-            Url: fileMetadata.flipkartUrl || null,
+            productUrl: fileMetadata.productUrl || null,
             productImageUrl: productImageUrl,
             description: description,
             uploadedAt: stats ? stats.mtime.toISOString() : null,

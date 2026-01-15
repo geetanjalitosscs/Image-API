@@ -10,7 +10,7 @@ const METADATA_FILE = path.join(process.cwd(), 'public', 'uploads', 'metadata.js
 
 interface ImageMetadata {
   filename: string;
-  flipkartUrl?: string;
+  productUrl?: string;
   productName?: string;
   productDescription?: string;
 }
@@ -175,14 +175,38 @@ export async function GET(
     }
 
     // Local file system
-    const filePath = path.join(UPLOAD_DIR, filename);
+    const decodedFilename = decodeURIComponent(filename);
+    const filePath = path.join(UPLOAD_DIR, decodedFilename);
+
+    console.log('Serving image:', {
+      requestedFilename: filename,
+      decodedFilename: decodedFilename,
+      filePath: filePath,
+      exists: existsSync(filePath)
+    });
 
     if (!existsSync(filePath)) {
-      return NextResponse.json({ error: 'File not found' }, { status: 404 });
+      // Try with original filename if decoded doesn't work
+      const altPath = path.join(UPLOAD_DIR, filename);
+      if (existsSync(altPath)) {
+        const fileBuffer = await readFile(altPath);
+        return new NextResponse(fileBuffer, {
+          headers: {
+            'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=31536000, immutable',
+          },
+        });
+      }
+      console.error('File not found:', { filePath, altPath });
+      return NextResponse.json({ 
+        error: 'File not found',
+        details: `Looking for: ${decodedFilename}`
+      }, { status: 404 });
     }
 
     const fileBuffer = await readFile(filePath);
     
+    console.log('Successfully serving image:', decodedFilename);
     return new NextResponse(fileBuffer, {
       headers: {
         'Content-Type': contentType,

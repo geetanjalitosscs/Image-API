@@ -4,7 +4,7 @@ import { useState, useRef } from 'react';
 
 export default function UploadPage() {
   const [files, setFiles] = useState<File[]>([]);
-  const [flipkartUrl, setFlipkartUrl] = useState<string>('');
+  const [productUrl, setProductUrl] = useState<string>('');
   const [uploading, setUploading] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -31,8 +31,8 @@ export default function UploadPage() {
   };
 
   const handleExtractUrl = async () => {
-    if (!flipkartUrl.trim()) {
-      setMessage({ type: 'error', text: 'Please enter a Flipkart URL.' });
+    if (!productUrl.trim()) {
+      setMessage({ type: 'error', text: 'Please enter a product URL.' });
       return;
     }
 
@@ -40,8 +40,8 @@ export default function UploadPage() {
     setMessage(null);
 
     try {
-      if (!flipkartUrl || !flipkartUrl.trim()) {
-        setMessage({ type: 'error', text: 'Please enter a Flipkart product URL.' });
+      if (!productUrl || !productUrl.trim()) {
+        setMessage({ type: 'error', text: 'Please enter a product URL.' });
         setExtracting(false);
         return;
       }
@@ -51,7 +51,7 @@ export default function UploadPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ flipkartUrl: flipkartUrl.trim() }),
+        body: JSON.stringify({ productUrl: productUrl.trim() }),
       });
 
       let data;
@@ -65,13 +65,19 @@ export default function UploadPage() {
 
       if (response.ok) {
         setMessage({ type: 'success', text: 'Product details extracted and image saved! Check gallery to see the product.' });
-        setFlipkartUrl('');
+        setProductUrl('');
         // Redirect to gallery after successful extraction
         setTimeout(() => {
           window.location.href = '/images';
         }, 1500);
       } else {
-        setMessage({ type: 'error', text: data.error || 'Failed to extract product details. Please check the URL and try again.' });
+        // Handle multi-line error messages from API
+        let errorText = data.error || 'Failed to extract product details. Please check the URL and try again.';
+        // If error contains newlines, format it better
+        if (errorText.includes('\n')) {
+          errorText = errorText.split('\n').join(' ');
+        }
+        setMessage({ type: 'error', text: errorText });
       }
     } catch (error: any) {
       console.error('Extract URL error:', error);
@@ -95,9 +101,9 @@ export default function UploadPage() {
       formData.append('images', file);
     });
     
-    // Add Flipkart URL if provided
-    if (flipkartUrl.trim()) {
-      formData.append('flipkartUrl', flipkartUrl.trim());
+    // Add product URL if provided
+    if (productUrl.trim()) {
+      formData.append('productUrl', productUrl.trim());
     }
 
     try {
@@ -111,7 +117,7 @@ export default function UploadPage() {
       if (response.ok) {
         setMessage({ type: 'success', text: `Successfully uploaded ${data.uploaded} image(s).` });
         setFiles([]);
-        setFlipkartUrl('');
+        setProductUrl('');
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
@@ -176,14 +182,14 @@ export default function UploadPage() {
         
         <div style={{ marginBottom: '1rem' }}>
           <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.875rem' }}>
-            Flipkart Product URL
+            Product URL
           </label>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <input
               type="url"
-              value={flipkartUrl}
-              onChange={(e) => setFlipkartUrl(e.target.value)}
-              placeholder="https://www.flipkart.com/product-url"
+              value={productUrl}
+              onChange={(e) => setProductUrl(e.target.value)}
+              placeholder="https://www.shopclues.com/... or https://webscraper.io/test-sites/..."
               style={{ 
                 flex: 1,
                 padding: '0.75rem',
@@ -194,14 +200,14 @@ export default function UploadPage() {
             />
             <button
               onClick={handleExtractUrl}
-              disabled={extracting || !flipkartUrl.trim()}
+              disabled={extracting || !productUrl.trim()}
               style={{
                 padding: '0.75rem 1.5rem',
-                background: extracting || !flipkartUrl.trim() ? '#9ca3af' : '#8b5cf6',
+                background: extracting || !productUrl.trim() ? '#9ca3af' : '#8b5cf6',
                 color: 'white',
                 border: 'none',
                 borderRadius: '4px',
-                cursor: extracting || !flipkartUrl.trim() ? 'not-allowed' : 'pointer',
+                cursor: extracting || !productUrl.trim() ? 'not-allowed' : 'pointer',
                 fontSize: '0.875rem',
                 fontWeight: '500',
                 whiteSpace: 'nowrap'
@@ -211,7 +217,7 @@ export default function UploadPage() {
             </button>
           </div>
           <p style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#6b7280' }}>
-            Paste the Flipkart product URL and click "Extract Details" to get product information, or use it when uploading images
+            Paste a ShopClues or webscraper.io product URL and click "Extract Details" to get product information, or use it when uploading images
           </p>
         </div>
       </div>

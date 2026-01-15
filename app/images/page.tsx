@@ -318,7 +318,7 @@ export default function ImagesPage() {
               >
                 <div style={{ position: 'relative', width: '100%', paddingTop: '75%', background: '#f3f4f6', cursor: 'pointer' }}>
                   <img
-                    src={image.url || `/api/images/${image.filename}`}
+                    src={(image.url && image.url.trim() && image.url.includes('/')) ? image.url : `/api/images/${encodeURIComponent(image.filename)}`}
                     alt={image.filename}
                     style={{
                       position: 'absolute',
@@ -330,17 +330,24 @@ export default function ImagesPage() {
                     }}
                     onError={(e) => {
                       const target = e.target as HTMLImageElement;
-                      // Try fallback to API endpoint if blob URL fails
-                      if (image.url && !image.url.includes('/api/images/')) {
-                        target.src = `/api/images/${image.filename}`;
+                      const apiUrl = `/api/images/${encodeURIComponent(image.filename)}`;
+                      // Try fallback to API endpoint if current URL fails
+                      if (target.src !== apiUrl && !target.dataset.fallbackTried) {
+                        target.dataset.fallbackTried = 'true';
+                        console.log('Image load error, trying API URL:', apiUrl);
+                        target.src = apiUrl;
                       } else {
-                        // Show placeholder or error state
+                        // Both URLs failed - show placeholder
+                        console.error('Both image URLs failed for:', image.filename);
                         target.style.display = 'none';
                         const parent = target.parentElement;
                         if (parent) {
                           parent.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af; font-size: 0.875rem;">Image not available</div>';
                         }
                       }
+                    }}
+                    onLoad={() => {
+                      console.log('Image loaded successfully:', image.filename);
                     }}
                     loading="lazy"
                   />

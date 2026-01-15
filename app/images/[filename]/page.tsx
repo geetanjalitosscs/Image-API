@@ -86,15 +86,22 @@ export default function ImageViewPage() {
           
           const index = imageData.findIndex((img: any) => img.filename === matchedImage.filename);
           setCurrentIndex(index >= 0 ? index : 0);
+          // Ensure API URL is properly encoded
+          const apiUrl = `/api/images/${encodeURIComponent(matchedImage.filename)}`;
           setImageInfo({
             filename: matchedImage.filename,
             url: matchedImage.url,
-            apiUrl: `/api/images/${matchedImage.filename}`,
+            apiUrl: apiUrl,
             title: matchedImage.title || '',
             description: matchedImage.description || '',
             size: matchedImage.size || null,
             uploadedAt: matchedImage.uploadedAt || null,
             contentType: matchedImage.contentType || null,
+          });
+          console.log('Image info set:', {
+            filename: matchedImage.filename,
+            url: matchedImage.url,
+            apiUrl: apiUrl
           });
           setError(null);
         } else {
@@ -244,7 +251,7 @@ export default function ImageViewPage() {
 
         <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
           <img
-            src={imageInfo.url}
+            src={imageInfo.apiUrl}
             alt={imageInfo.filename}
             style={{
               maxWidth: '100%',
@@ -254,13 +261,27 @@ export default function ImageViewPage() {
               boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
             }}
             onError={(e) => {
-              console.error('Image load error:', e);
-              // Try fallback to API URL
-              if (imageInfo.url !== imageInfo.apiUrl) {
-                (e.target as HTMLImageElement).src = imageInfo.apiUrl;
+              const target = e.target as HTMLImageElement;
+              console.error('Image load error:', {
+                currentSrc: target.currentSrc,
+                apiUrl: imageInfo.apiUrl,
+                blobUrl: imageInfo.url,
+                filename: imageInfo.filename
+              });
+              
+              // Try fallback to blob URL if API URL fails
+              if (imageInfo.url && imageInfo.url !== imageInfo.apiUrl && !target.dataset.fallbackTried) {
+                target.dataset.fallbackTried = 'true';
+                console.log('Trying fallback blob URL:', imageInfo.url);
+                target.src = imageInfo.url;
               } else {
-                setError('Failed to load image');
+                // Both URLs failed - show error with helpful message
+                console.error('Both image URLs failed to load');
+                setError(`Failed to load image: ${imageInfo.filename}. Please check if the file exists.`);
               }
+            }}
+            onLoad={() => {
+              console.log('Image loaded successfully from:', imageInfo.apiUrl);
             }}
           />
         </div>

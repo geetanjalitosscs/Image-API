@@ -43,6 +43,15 @@ export default function RootLayout({
                     e.stopPropagation();
                     return false;
                   }
+                  // Also suppress "e is not defined" errors from extensions
+                  if (e.message && (
+                    e.message.includes('e is not defined') ||
+                    e.message.includes('ReferenceError: e is not defined')
+                  )) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                  }
                 }, true);
                 
                 // Suppress unhandled promise rejections from extensions
