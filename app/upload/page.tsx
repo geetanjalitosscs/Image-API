@@ -40,6 +40,12 @@ export default function UploadPage() {
     setMessage(null);
 
     try {
+      if (!flipkartUrl || !flipkartUrl.trim()) {
+        setMessage({ type: 'error', text: 'Please enter a Flipkart product URL.' });
+        setExtracting(false);
+        return;
+      }
+
       const response = await fetch('/api/extract-url', {
         method: 'POST',
         headers: {
@@ -48,7 +54,14 @@ export default function UploadPage() {
         body: JSON.stringify({ flipkartUrl: flipkartUrl.trim() }),
       });
 
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (parseError) {
+        setMessage({ type: 'error', text: 'Invalid response from server. Please try again.' });
+        setExtracting(false);
+        return;
+      }
 
       if (response.ok) {
         setMessage({ type: 'success', text: 'Product details extracted and image saved! Check gallery to see the product.' });
@@ -58,10 +71,11 @@ export default function UploadPage() {
           window.location.href = '/images';
         }, 1500);
       } else {
-        setMessage({ type: 'error', text: data.error || 'Failed to extract product details.' });
+        setMessage({ type: 'error', text: data.error || 'Failed to extract product details. Please check the URL and try again.' });
       }
-    } catch (error) {
-      setMessage({ type: 'error', text: 'Network error. Please try again.' });
+    } catch (error: any) {
+      console.error('Extract URL error:', error);
+      setMessage({ type: 'error', text: error.message || 'Network error. Please check your connection and try again.' });
     } finally {
       setExtracting(false);
     }
