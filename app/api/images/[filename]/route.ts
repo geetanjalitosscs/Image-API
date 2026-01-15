@@ -245,8 +245,35 @@ export async function DELETE(
       
       try {
         // Delete from Vercel Blob Storage
-        const { del } = await import('@vercel/blob');
-        await del(filename);
+        const { list, del } = await import('@vercel/blob');
+        
+        // Decode URL-encoded filename
+        const decodedFilename = decodeURIComponent(filename);
+        
+        // List all blobs to find the one matching the filename
+        let allBlobs: any[] = [];
+        let cursor: string | undefined = undefined;
+        
+        do {
+          const result: { blobs: any[]; cursor?: string } = await list({ limit: 1000, cursor });
+          allBlobs = allBlobs.concat(result.blobs);
+          cursor = result.cursor;
+        } while (cursor);
+        
+        // Find the blob matching the filename
+        const blob = allBlobs.find((b: any) => {
+          const blobFilename = b.pathname.split('/').pop() || b.pathname;
+          return blobFilename === decodedFilename || 
+                 blobFilename === filename ||
+                 blobFilename.toLowerCase() === decodedFilename.toLowerCase();
+        });
+        
+        if (!blob) {
+          return NextResponse.json({ error: 'File not found in blob storage' }, { status: 404 });
+        }
+        
+        // Delete using blob URL (recommended method)
+        await del(blob.url);
         
         // Remove from metadata
         const metadata = await loadMetadata();
