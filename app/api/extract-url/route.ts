@@ -146,13 +146,32 @@ async function extractFlipkartProductDetails(flipkartUrl: string): Promise<Flipk
 
       if (!response.ok) {
         console.error('Failed to fetch Flipkart page:', response.status, response.statusText);
+        // Even if response is not OK, try to get the text to see what we got
+        try {
+          const errorText = await response.text();
+          console.error('Error response body:', errorText.substring(0, 500));
+        } catch (e) {
+          // Ignore
+        }
         return null;
       }
 
       const html = await response.text();
       
       if (!html || html.length < 100) {
-        console.error('Received empty or too short HTML response');
+        console.error('Received empty or too short HTML response. Length:', html?.length || 0);
+        return null;
+      }
+
+      // Check if we got a redirect or error page
+      if (html.includes('Access Denied') || html.includes('403') || html.includes('Blocked')) {
+        console.error('Access denied or blocked by Flipkart');
+        return null;
+      }
+
+      // Check if we got a login page
+      if (html.includes('login') && html.includes('password')) {
+        console.error('Got login page instead of product page');
         return null;
       }
     
@@ -380,6 +399,20 @@ async function extractFlipkartProductDetails(flipkartUrl: string): Promise<Flipk
         }
       }
 
+      // If still no name, try extracting from URL path
+      if (!productName || productName === 'Product from Flipkart') {
+        // Try to extract from URL: /motorola-g57-power-5g-pantone-regatta-128-gb/p/itmaea0032ab54ab
+        const urlMatch = cleanUrl.match(/\/([^\/]+)\/p\//);
+        if (urlMatch && urlMatch[1]) {
+          productName = urlMatch[1]
+            .split('-')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ')
+            .replace(/\b(\d+)\s*(gb|tb|mb)\b/gi, '($1 $2)')
+            .trim();
+        }
+      }
+
       // If still no name, use a default
       if (!productName) {
         productName = 'Product from Flipkart';
@@ -389,6 +422,14 @@ async function extractFlipkartProductDetails(flipkartUrl: string): Promise<Flipk
       if (!productDescription) {
         productDescription = 'Product details from Flipkart';
       }
+
+      // Even if image URL is not found, we should still return the data
+      // The image might be available later or can be uploaded separately
+      console.log('Extracted product:', {
+        name: productName,
+        description: productDescription.substring(0, 50) + '...',
+        imageUrl: productImageUrl ? 'Found' : 'Not found',
+      });
 
       return {
         productName,
@@ -403,10 +444,53 @@ async function extractFlipkartProductDetails(flipkartUrl: string): Promise<Flipk
       } else {
         console.error('Error fetching Flipkart page:', fetchError.message);
       }
+      
+      // Fallback: Try to extract basic info from URL if fetch fails
+      console.log('Attempting fallback extraction from URL');
+      const urlMatch = cleanUrl.match(/\/([^\/]+)\/p\//);
+      if (urlMatch && urlMatch[1]) {
+        const urlProductName = urlMatch[1]
+          .split('-')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ')
+          .replace(/\b(\d+)\s*(gb|tb|mb)\b/gi, '($1 $2)')
+          .trim();
+        
+        return {
+          productName: urlProductName || 'Product from Flipkart',
+          productDescription: 'Product details from Flipkart',
+          productImageUrl: '',
+          productUrl: cleanUrl,
+        };
+      }
+      
       return null;
     }
   } catch (error: any) {
     console.error('Error extracting Flipkart product details:', error?.message || error);
+    
+    // Fallback: Try to extract basic info from URL
+    try {
+      const urlMatch = flipkartUrl.match(/\/([^\/]+)\/p\//);
+      if (urlMatch && urlMatch[1]) {
+        const urlProductName = urlMatch[1]
+          .split('-')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ')
+          .replace(/\b(\d+)\s*(gb|tb|mb)\b/gi, '($1 $2)')
+          .trim();
+        
+        return {
+          productName: urlProductName || 'Product from Flipkart',
+          productDescription: 'Product details from Flipkart',
+          productImageUrl: '',
+          productUrl: flipkartUrl.trim(),
+        };
+      }
+    } catch (fallbackError) {
+      // Ignore fallback errors
+    }
+    
     return null;
   }
 }
@@ -447,24 +531,46 @@ export async function POST(request: NextRequest) {
     const productDetails = await extractFlipkartProductDetails(trimmedUrl);
 
     if (!productDetails) {
+      console.error('Failed to extract product details. This might be due to:');
+      console.error('1. Flipkart blocking server-side requests');
+      console.error('2. Invalid or inaccessible URL');
+      console.error('3. Changed page structure');
       return NextResponse.json(
-        { error: 'Failed to extract product details. The URL might be invalid or the page structure has changed. Please try again or check the URL.' },
+        { error: 'Failed to extract product details. The URL might be invalid, blocked, or the page structure has changed. Please try again or check the URL.' },
         { status: 400 }
       );
     }
 
-    // Download and save the product image
+    // Download and save the product image (non-blocking - continue even if it fails)
     let savedFilename: string | null = null;
     if (productDetails.productImageUrl) {
-      savedFilename = await downloadAndSaveImage(
-        productDetails.productImageUrl,
-        productDetails.productName,
-        request
-      );
+      try {
+        savedFilename = await downloadAndSaveImage(
+          productDetails.productImageUrl,
+          productDetails.productName,
+          request
+        );
+      } catch (imageError) {
+        console.error('Error downloading image (non-critical):', imageError);
+        // Continue without image - we still have product details
+      }
     }
 
-    // Save metadata if image was saved
-    if (savedFilename) {
+    // Save metadata even if image wasn't saved (for future reference)
+    // We'll create a placeholder entry
+    if (!savedFilename) {
+      // Generate a placeholder filename for metadata storage
+      const sanitizedName = productDetails.productName
+        .replace(/[^a-zA-Z0-9.-]/g, '_')
+        .replace(/_{2,}/g, '_')
+        .toLowerCase()
+        .substring(0, 50);
+      const randomSuffix = randomBytes(8).toString('hex');
+      savedFilename = `placeholder_${sanitizedName}_${randomSuffix}.txt`;
+    }
+
+    // Save metadata
+    try {
       const metadata = await loadMetadata();
       metadata[savedFilename] = {
         filename: savedFilename,
@@ -473,15 +579,20 @@ export async function POST(request: NextRequest) {
         productDescription: productDetails.productDescription,
       };
       await saveMetadata(metadata);
+    } catch (metadataError) {
+      console.error('Error saving metadata (non-critical):', metadataError);
+      // Continue - metadata save failure shouldn't block the response
     }
 
     // Generate product image URL
     const protocol = request.headers.get('x-forwarded-proto') || 
                      (request.url.startsWith('https') ? 'https' : 'http');
     const host = request.headers.get('host') || 'localhost:3000';
-    const productImageUrl = savedFilename 
+    
+    // Only use saved filename if it's not a placeholder
+    const productImageUrl = (savedFilename && !savedFilename.startsWith('placeholder_'))
       ? `${protocol}://${host}/api/images/${savedFilename}`
-      : productDetails.productImageUrl;
+      : (productDetails.productImageUrl || '');
 
     // Return exactly 4 fields as requested
     return NextResponse.json({
