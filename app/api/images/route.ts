@@ -119,7 +119,24 @@ export async function GET(request: NextRequest) {
           })
           .map(blob => {
             // Extract filename from pathname (handle both /filename and filename formats)
-            const filename = blob.pathname.split('/').pop() || blob.pathname;
+            const fullPathname = blob.pathname.split('/').pop() || blob.pathname;
+            // Vercel adds a suffix like -WkGu3YCeBTxMX6HA3kd8bwXAGHXvMy, so extract base filename
+            // Format: filename-randomSuffix.jpg -> filename.jpg
+            const pathExt = path.extname(fullPathname);
+            const baseName = path.basename(fullPathname, pathExt);
+            // Remove Vercel suffix (everything after last hyphen that looks like a token - 32 char alphanumeric)
+            let filename = fullPathname;
+            if (baseName.includes('-')) {
+              const parts = baseName.split('-');
+              const lastPart = parts[parts.length - 1];
+              // Check if last part looks like a Vercel token (32 chars, alphanumeric)
+              if (lastPart && lastPart.length === 32 && /^[a-zA-Z0-9]+$/.test(lastPart)) {
+                // Remove the last part (token) and reconstruct filename
+                const baseFilename = parts.slice(0, -1).join('-');
+                filename = baseFilename + pathExt;
+              }
+            }
+            
             // Get file extension to determine content type
             const ext = path.extname(filename).toLowerCase();
             const contentType = 
@@ -128,8 +145,8 @@ export async function GET(request: NextRequest) {
               ext === '.webp' ? 'image/webp' :
               null;
             
-            // Get metadata for this file
-            const fileMetadata = metadata[filename] || {};
+            // Get metadata for this file - try both full pathname and base filename
+            const fileMetadata = metadata[filename] || metadata[fullPathname] || {};
             
             // Use product name if available, otherwise extract from filename
             const productName = fileMetadata.productName || extractProductName(filename);
@@ -141,7 +158,6 @@ export async function GET(request: NextRequest) {
             
             return {
               filename: filename,
-              url: blob.url, // Add url field for image display
               productName: productName,
               title: title,
               productUrl: fileMetadata.productUrl || null,
@@ -209,7 +225,6 @@ export async function GET(request: NextRequest) {
           
           return {
             filename: file,
-            url: `/api/images/${encodeURIComponent(file)}`, // Add url field for image display with proper encoding
             productName: productName,
             title: title,
             productUrl: fileMetadata.productUrl || null,

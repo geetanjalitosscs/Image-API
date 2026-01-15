@@ -179,7 +179,8 @@ export async function POST(request: NextRequest) {
               access: 'public',
               contentType: file.type,
             });
-            const savedFilename = blob.pathname.split('/').pop() || uniqueFilename;
+            // Use uniqueFilename for metadata key (Vercel might add suffix to pathname)
+            const savedFilename = uniqueFilename;
             const productImageUrl = getProductImageUrl(savedFilename, request);
             
             // Save metadata if product URL is provided
