@@ -1,8 +1,17 @@
-import { NextResponse } from 'next/server';
-import { readdir } from 'fs/promises';
+import { NextRequest, NextResponse } from 'next/server';
+import { readdir, readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { list } from '@vercel/blob';
+
+interface ImageMetadata {
+  filename: string;
+  flipkartUrl?: string;
+  productName?: string;
+  productDescription?: string;
+}
+
+const METADATA_FILE = path.join(process.cwd(), 'public', 'uploads', 'metadata.json');
 
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 const IS_VERCEL = process.env.VERCEL === '1';
@@ -14,10 +23,68 @@ function isValidImageFile(filename: string): boolean {
   return ALLOWED_EXTENSIONS.includes(ext);
 }
 
+function extractProductName(filename: string): string {
+  // Extract product name from filename (everything before the last underscore and random suffix)
+  // Example: "phone1_9712de3ac759785d.webp" -> "phone1"
+  // Example: "product_name_abc123.jpg" -> "product name"
+  const ext = path.extname(filename);
+  const baseName = path.basename(filename, ext);
+  
+  // Split by underscore and take all parts except the last one (which is the random suffix)
+  const parts = baseName.split('_');
+  if (parts.length > 1) {
+    // Remove the last part (random suffix) and join the rest
+    const productParts = parts.slice(0, -1);
+    return productParts.join(' ').trim() || baseName;
+  }
+  
+  // If no underscore, return the base name
+  return baseName;
+}
+
+function getProductImageUrl(filename: string, request?: NextRequest): string {
+  // Generate product image URL like: http://localhost:3000/api/images/filename.jpg
+  if (request) {
+    // Use request headers to get the host
+    const protocol = request.headers.get('x-forwarded-proto') || 
+                     (request.url.startsWith('https') ? 'https' : 'http');
+    const host = request.headers.get('host') || 'localhost:3000';
+    return `${protocol}://${host}/api/images/${filename}`;
+  }
+  // Fallback for local development
+  const protocol = process.env.NEXT_PUBLIC_PROTOCOL || 'http';
+  const host = process.env.NEXT_PUBLIC_HOST || 'localhost:3000';
+  return `${protocol}://${host}/api/images/${filename}`;
+}
+
+async function loadMetadata(): Promise<Record<string, ImageMetadata>> {
+  try {
+    if (existsSync(METADATA_FILE)) {
+      const content = await readFile(METADATA_FILE, 'utf-8');
+      return JSON.parse(content);
+    }
+  } catch (error) {
+    console.error('Error loading metadata:', error);
+  }
+  return {};
+}
+
+async function saveMetadata(metadata: Record<string, ImageMetadata>): Promise<void> {
+  try {
+    const dir = path.dirname(METADATA_FILE);
+    if (!existsSync(dir)) {
+      await require('fs/promises').mkdir(dir, { recursive: true });
+    }
+    await writeFile(METADATA_FILE, JSON.stringify(metadata, null, 2), 'utf-8');
+  } catch (error) {
+    console.error('Error saving metadata:', error);
+  }
+}
+
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     if (IS_VERCEL) {
       if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -43,6 +110,8 @@ export async function GET() {
         console.log('Total blobs found:', allBlobs.length);
         console.log('Blob samples:', allBlobs.slice(0, 3).map(b => ({ pathname: b.pathname, url: b.url })));
         
+        const metadata = await loadMetadata();
+        
         const imageFiles = allBlobs
           .filter(blob => {
             const ext = path.extname(blob.pathname).toLowerCase();
@@ -58,15 +127,26 @@ export async function GET() {
               ext === '.png' ? 'image/png' :
               ext === '.webp' ? 'image/webp' :
               null;
-            // Return complete image data
+            
+            // Get metadata for this file
+            const fileMetadata = metadata[filename] || {};
+            
+            // Use Flipkart product name if available, otherwise extract from filename
+            const productName = fileMetadata.productName || extractProductName(filename);
+            const productImageUrl = getProductImageUrl(filename, request);
+            
+            // Return complete image data in specified order
+            const title = filename.replace(ext, '').replace(/_/g, ' ').trim() || 'Untitled Image';
+            const description = fileMetadata.productDescription || `Image uploaded on ${new Date((blob as any).uploadedAt || Date.now()).toLocaleDateString()}`;
+            
             return {
-              filename: filename, // Add filename for API URL construction
-              url: blob.url,
-              title: filename.replace(ext, '').replace(/_/g, ' ').trim() || 'Untitled Image',
-              description: `Image uploaded on ${new Date((blob as any).uploadedAt || Date.now()).toLocaleDateString()}`,
-              size: (blob as any).size || null,
+              filename: filename,
+              productName: productName,
+              title: title,
+              Url: fileMetadata.flipkartUrl || null,
+              productImageUrl: productImageUrl,
+              description: description,
               uploadedAt: (blob as any).uploadedAt || null,
-              contentType: contentType
             };
           })
           .sort((a, b) => a.title.localeCompare(b.title));
@@ -101,6 +181,7 @@ export async function GET() {
         });
       }
 
+      const metadata = await loadMetadata();
       const files = await readdir(UPLOAD_DIR);
       const imageFiles = files
         .filter(file => isValidImageFile(file))
@@ -113,14 +194,26 @@ export async function GET() {
             ext === '.png' ? 'image/png' :
             ext === '.webp' ? 'image/webp' :
             null;
+          
+          // Get metadata for this file
+          const fileMetadata = metadata[file] || {};
+          
+          // Use Flipkart product name if available, otherwise extract from filename
+          const productName = fileMetadata.productName || extractProductName(file);
+          const productImageUrl = getProductImageUrl(file, request);
+          
+          // Return complete image data in specified order
+          const title = file.replace(ext, '').replace(/_/g, ' ').trim() || 'Untitled Image';
+          const description = fileMetadata.productDescription || (stats ? `Image uploaded on ${new Date(stats.mtime).toLocaleDateString()}` : 'Image');
+          
           return {
-            filename: file, // Add filename for API URL construction
-            url: `/api/images/${file}`,
-            title: file.replace(ext, '').replace(/_/g, ' ').trim() || 'Untitled Image',
-            description: stats ? `Image uploaded on ${new Date(stats.mtime).toLocaleDateString()}` : 'Image',
-            size: stats ? stats.size : null,
+            filename: file,
+            productName: productName,
+            title: title,
+            Url: fileMetadata.flipkartUrl || null,
+            productImageUrl: productImageUrl,
+            description: description,
             uploadedAt: stats ? stats.mtime.toISOString() : null,
-            contentType: contentType
           };
         })
         .sort((a, b) => a.title.localeCompare(b.title));

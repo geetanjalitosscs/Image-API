@@ -35,4 +35,5 @@ next-env.d.ts
 # uploads (keep directory but ignore files)
 /public/uploads/*
 !/public/uploads/.gitkeep
+!/public/uploads/metadata.json
 

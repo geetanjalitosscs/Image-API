@@ -4,7 +4,9 @@ import { useState, useRef } from 'react';
 
 export default function UploadPage() {
   const [files, setFiles] = useState<File[]>([]);
+  const [flipkartUrl, setFlipkartUrl] = useState<string>('');
   const [uploading, setUploading] = useState(false);
+  const [extracting, setExtracting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -28,6 +30,43 @@ export default function UploadPage() {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleExtractUrl = async () => {
+    if (!flipkartUrl.trim()) {
+      setMessage({ type: 'error', text: 'Please enter a Flipkart URL.' });
+      return;
+    }
+
+    setExtracting(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch('/api/extract-url', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ flipkartUrl: flipkartUrl.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'Product details extracted and image saved! Check gallery to see the product.' });
+        setFlipkartUrl('');
+        // Redirect to gallery after successful extraction
+        setTimeout(() => {
+          window.location.href = '/images';
+        }, 1500);
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Failed to extract product details.' });
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Network error. Please try again.' });
+    } finally {
+      setExtracting(false);
+    }
+  };
+
   const handleUpload = async () => {
     if (files.length === 0) {
       setMessage({ type: 'error', text: 'Please select at least one image.' });
@@ -41,6 +80,11 @@ export default function UploadPage() {
     files.forEach(file => {
       formData.append('images', file);
     });
+    
+    // Add Flipkart URL if provided
+    if (flipkartUrl.trim()) {
+      formData.append('flipkartUrl', flipkartUrl.trim());
+    }
 
     try {
       const response = await fetch('/api/upload', {
@@ -53,6 +97,7 @@ export default function UploadPage() {
       if (response.ok) {
         setMessage({ type: 'success', text: `Successfully uploaded ${data.uploaded} image(s).` });
         setFiles([]);
+        setFlipkartUrl('');
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
@@ -95,14 +140,66 @@ export default function UploadPage() {
       </div>
 
       <div style={{ marginBottom: '2rem' }}>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/jpeg,image/jpg,image/png,image/webp"
-          multiple
-          onChange={handleFileChange}
-          style={{ marginBottom: '1rem' }}
-        />
+        <div style={{ marginBottom: '1.5rem' }}>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.875rem' }}>
+            Select Images
+          </label>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/jpg,image/png,image/webp"
+            multiple
+            onChange={handleFileChange}
+            style={{ 
+              width: '100%',
+              padding: '0.5rem',
+              border: '1px solid #d1d5db',
+              borderRadius: '4px',
+              fontSize: '0.875rem'
+            }}
+          />
+        </div>
+        
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.875rem' }}>
+            Flipkart Product URL
+          </label>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <input
+              type="url"
+              value={flipkartUrl}
+              onChange={(e) => setFlipkartUrl(e.target.value)}
+              placeholder="https://www.flipkart.com/product-url"
+              style={{ 
+                flex: 1,
+                padding: '0.75rem',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                fontSize: '0.875rem'
+              }}
+            />
+            <button
+              onClick={handleExtractUrl}
+              disabled={extracting || !flipkartUrl.trim()}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: extracting || !flipkartUrl.trim() ? '#9ca3af' : '#8b5cf6',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: extracting || !flipkartUrl.trim() ? 'not-allowed' : 'pointer',
+                fontSize: '0.875rem',
+                fontWeight: '500',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {extracting ? 'Extracting...' : 'Extract Details'}
+            </button>
+          </div>
+          <p style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#6b7280' }}>
+            Paste the Flipkart product URL and click "Extract Details" to get product information, or use it when uploading images
+          </p>
+        </div>
       </div>
 
       {files.length > 0 && (
@@ -141,22 +238,26 @@ export default function UploadPage() {
         </div>
       )}
 
-      <button
-        onClick={handleUpload}
-        disabled={uploading || files.length === 0}
-        style={{
-          padding: '0.75rem 1.5rem',
-          background: uploading || files.length === 0 ? '#9ca3af' : '#3b82f6',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: uploading || files.length === 0 ? 'not-allowed' : 'pointer',
-          fontSize: '1rem',
-          fontWeight: '500',
-        }}
-      >
-        {uploading ? 'Uploading...' : 'Upload Images'}
-      </button>
+
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+        <button
+          onClick={handleUpload}
+          disabled={uploading || files.length === 0}
+          style={{
+            flex: 1,
+            padding: '0.75rem 1.5rem',
+            background: uploading || files.length === 0 ? '#9ca3af' : '#3b82f6',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: uploading || files.length === 0 ? 'not-allowed' : 'pointer',
+            fontSize: '1rem',
+            fontWeight: '500',
+          }}
+        >
+          {uploading ? 'Uploading...' : 'Upload Images'}
+        </button>
+      </div>
 
       {message && (
         <div
