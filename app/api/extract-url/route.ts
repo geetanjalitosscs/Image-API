@@ -96,7 +96,8 @@ async function downloadAndSaveImage(imageUrl: string, productName: string, reque
         access: 'public',
         contentType: contentType,
       });
-      return blob.pathname.split('/').pop() || uniqueFilename;
+      // Return uniqueFilename for metadata key (Vercel might add suffix to pathname)
+      return uniqueFilename;
     } else {
       if (!existsSync(UPLOAD_DIR)) {
         await mkdir(UPLOAD_DIR, { recursive: true });
@@ -695,6 +696,7 @@ export async function POST(request: NextRequest) {
         productDescription: productDetails.productDescription,
       };
       await saveMetadata(metadata);
+      console.log('Saved metadata for:', savedFilename, 'with productUrl:', productDetails.productUrl);
     } catch (metadataError) {
       console.error('Error saving metadata (non-critical):', metadataError);
       // Continue - metadata save failure shouldn't block the response

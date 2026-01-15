@@ -146,8 +146,30 @@ export async function GET(request: NextRequest) {
               ext === '.webp' ? 'image/webp' :
               null;
             
-            // Get metadata for this file - try both full pathname and base filename
+            // Get metadata for this file - try multiple matching strategies
             let fileMetadata = metadata[filename] || metadata[fullPathname] || {};
+            
+            // If not found, try to find by base name (without Vercel suffix)
+            if (!fileMetadata.productUrl) {
+              // Try all metadata keys to find a match
+              const allKeys = Object.keys(metadata);
+              // Try exact match first
+              let matchingKey = allKeys.find(key => key === filename || key === fullPathname);
+              
+              // If no exact match, try base name match (remove Vercel suffix from fullPathname)
+              if (!matchingKey && fullPathname !== filename) {
+                const baseName = filename.replace(ext, '');
+                matchingKey = allKeys.find(key => {
+                  const keyBase = key.replace(path.extname(key), '');
+                  return keyBase === baseName || keyBase.includes(baseName) || baseName.includes(keyBase);
+                });
+              }
+              
+              if (matchingKey && metadata[matchingKey]) {
+                fileMetadata = metadata[matchingKey];
+                console.log('Found metadata by matching:', { filename, matchingKey, productUrl: fileMetadata.productUrl });
+              }
+            }
             
             // If productUrl not found, try to find it by matching base filename (without random suffix)
             if (!fileMetadata.productUrl) {
