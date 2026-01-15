@@ -112,12 +112,13 @@ export async function GET(request: NextRequest) {
         
         const metadata = await loadMetadata();
         
-        const imageFiles = allBlobs
-          .filter(blob => {
-            const ext = path.extname(blob.pathname).toLowerCase();
-            return ALLOWED_EXTENSIONS.includes(ext);
-          })
-          .map(blob => {
+        const imageFiles = await Promise.all(
+          allBlobs
+            .filter(blob => {
+              const ext = path.extname(blob.pathname).toLowerCase();
+              return ALLOWED_EXTENSIONS.includes(ext);
+            })
+            .map(async (blob) => {
             // Extract filename from pathname (handle both /filename and filename formats)
             const fullPathname = blob.pathname.split('/').pop() || blob.pathname;
             // Vercel adds a suffix like -WkGu3YCeBTxMX6HA3kd8bwXAGHXvMy, so extract base filename
@@ -146,10 +147,78 @@ export async function GET(request: NextRequest) {
               null;
             
             // Get metadata for this file - try both full pathname and base filename
-            const fileMetadata = metadata[filename] || metadata[fullPathname] || {};
+            let fileMetadata = metadata[filename] || metadata[fullPathname] || {};
+            
+            // If productUrl not found, try to find it by matching base filename (without random suffix)
+            if (!fileMetadata.productUrl) {
+              const baseName = filename.replace(ext, '');
+              const baseParts = baseName.split('_');
+              if (baseParts.length > 1) {
+                // Try to find metadata entry with same base name (different random suffix)
+                const matchingKey = Object.keys(metadata).find(key => {
+                  const keyExt = path.extname(key);
+                  const keyBaseName = key.replace(keyExt, '');
+                  const keyParts = keyBaseName.split('_');
+                  if (keyParts.length > 1 && baseParts.length > 1) {
+                    // Compare all parts except the last one (random suffix)
+                    const keyBase = keyParts.slice(0, -1).join('_');
+                    const filenameBase = baseParts.slice(0, -1).join('_');
+                    return keyBase === filenameBase;
+                  }
+                  return false;
+                });
+                
+                if (matchingKey && metadata[matchingKey]?.productUrl) {
+                  fileMetadata = { ...fileMetadata, ...metadata[matchingKey] };
+                }
+              }
+            }
             
             // Use product name if available, otherwise extract from filename
             const productName = fileMetadata.productName || extractProductName(filename);
+            
+            // If still no productUrl, try to find it by matching productName in all metadata
+            let productUrl = fileMetadata.productUrl || null;
+            if (!productUrl && productName) {
+              // Search all metadata entries for matching productName
+              const matchingEntry = Object.values(metadata).find(entry => 
+                entry.productName && 
+                entry.productName.toLowerCase().trim() === productName.toLowerCase().trim() &&
+                entry.productUrl
+              );
+              
+              if (matchingEntry?.productUrl) {
+                productUrl = matchingEntry.productUrl;
+                // Update metadata with found URL
+                const updatedMetadata = await loadMetadata();
+                if (!updatedMetadata[filename]) {
+                  updatedMetadata[filename] = { filename };
+                }
+                updatedMetadata[filename].productUrl = productUrl;
+                await saveMetadata(updatedMetadata);
+                fileMetadata.productUrl = productUrl;
+              }
+            }
+            
+            // If still no productUrl, try to extract from description
+            if (!productUrl) {
+              const description = fileMetadata.productDescription || `Image uploaded on ${new Date((blob as any).uploadedAt || Date.now()).toLocaleDateString()}`;
+              // Try to find URL in description
+              const urlMatch = description.match(/https?:\/\/[^\s\)]+/i);
+              if (urlMatch && urlMatch[0]) {
+                productUrl = urlMatch[0].trim();
+                // Update metadata with found URL
+                if (productUrl) {
+                  const updatedMetadata = await loadMetadata();
+                  if (!updatedMetadata[filename]) {
+                    updatedMetadata[filename] = { filename };
+                  }
+                  updatedMetadata[filename].productUrl = productUrl;
+                  await saveMetadata(updatedMetadata);
+                  fileMetadata.productUrl = productUrl;
+                }
+              }
+            }
             const productImageUrl = getProductImageUrl(filename, request);
             
             // Return complete image data in specified order
@@ -160,13 +229,16 @@ export async function GET(request: NextRequest) {
               filename: filename,
               productName: productName,
               title: title,
-              productUrl: fileMetadata.productUrl || null,
+              productUrl: productUrl,
               productImageUrl: productImageUrl,
               description: description,
               uploadedAt: (blob as any).uploadedAt || null,
             };
-          })
-          .sort((a, b) => a.title.localeCompare(b.title));
+            })
+        );
+        
+        // Sort after Promise.all resolves
+        imageFiles.sort((a, b) => a.title.localeCompare(b.title));
         
         console.log('Filtered image files:', imageFiles.length);
         return NextResponse.json({ 
@@ -200,9 +272,10 @@ export async function GET(request: NextRequest) {
 
       const metadata = await loadMetadata();
       const files = await readdir(UPLOAD_DIR);
-      const imageFiles = files
-        .filter(file => isValidImageFile(file))
-        .map(file => {
+      const imageFiles = await Promise.all(
+        files
+          .filter(file => isValidImageFile(file))
+          .map(async (file) => {
           const filePath = path.join(UPLOAD_DIR, file);
           const stats = existsSync(filePath) ? require('fs').statSync(filePath) : null;
           const ext = path.extname(file).toLowerCase();
@@ -213,10 +286,78 @@ export async function GET(request: NextRequest) {
             null;
           
           // Get metadata for this file
-          const fileMetadata = metadata[file] || {};
+          let fileMetadata = metadata[file] || {};
           
-          // Use Flipkart product name if available, otherwise extract from filename
+          // If productUrl not found, try to find it by matching base filename (without random suffix)
+          if (!fileMetadata.productUrl) {
+            const baseName = file.replace(ext, '');
+            const baseParts = baseName.split('_');
+            if (baseParts.length > 1) {
+              // Try to find metadata entry with same base name (different random suffix)
+              const matchingKey = Object.keys(metadata).find(key => {
+                const keyExt = path.extname(key);
+                const keyBaseName = key.replace(keyExt, '');
+                const keyParts = keyBaseName.split('_');
+                if (keyParts.length > 1 && baseParts.length > 1) {
+                  // Compare all parts except the last one (random suffix)
+                  const keyBase = keyParts.slice(0, -1).join('_');
+                  const filenameBase = baseParts.slice(0, -1).join('_');
+                  return keyBase === filenameBase;
+                }
+                return false;
+              });
+              
+              if (matchingKey && metadata[matchingKey]?.productUrl) {
+                fileMetadata = { ...fileMetadata, ...metadata[matchingKey] };
+              }
+            }
+          }
+          
+          // Use product name if available, otherwise extract from filename
           const productName = fileMetadata.productName || extractProductName(file);
+          
+          // If still no productUrl, try to find it by matching productName in all metadata
+          let productUrl = fileMetadata.productUrl || null;
+          if (!productUrl && productName) {
+            // Search all metadata entries for matching productName
+            const matchingEntry = Object.values(metadata).find(entry => 
+              entry.productName && 
+              entry.productName.toLowerCase().trim() === productName.toLowerCase().trim() &&
+              entry.productUrl
+            );
+            
+            if (matchingEntry?.productUrl) {
+              productUrl = matchingEntry.productUrl;
+              // Update metadata with found URL
+              const updatedMetadata = await loadMetadata();
+              if (!updatedMetadata[file]) {
+                updatedMetadata[file] = { filename: file };
+              }
+              updatedMetadata[file].productUrl = productUrl;
+              await saveMetadata(updatedMetadata);
+              fileMetadata.productUrl = productUrl;
+            }
+          }
+          
+          // If still no productUrl, try to extract from description
+          if (!productUrl) {
+            const description = fileMetadata.productDescription || (stats ? `Image uploaded on ${new Date(stats.mtime).toLocaleDateString()}` : 'Image');
+            // Try to find URL in description
+            const urlMatch = description.match(/https?:\/\/[^\s\)]+/i);
+            if (urlMatch && urlMatch[0]) {
+              productUrl = urlMatch[0].trim();
+              // Update metadata with found URL
+              if (productUrl) {
+                const updatedMetadata = await loadMetadata();
+                if (!updatedMetadata[file]) {
+                  updatedMetadata[file] = { filename: file };
+                }
+                updatedMetadata[file].productUrl = productUrl;
+                await saveMetadata(updatedMetadata);
+                fileMetadata.productUrl = productUrl;
+              }
+            }
+          }
           const productImageUrl = getProductImageUrl(file, request);
           
           // Return complete image data in specified order
@@ -227,13 +368,16 @@ export async function GET(request: NextRequest) {
             filename: file,
             productName: productName,
             title: title,
-            productUrl: fileMetadata.productUrl || null,
+            productUrl: productUrl,
             productImageUrl: productImageUrl,
             description: description,
             uploadedAt: stats ? stats.mtime.toISOString() : null,
           };
-        })
-        .sort((a, b) => a.title.localeCompare(b.title));
+          })
+      );
+      
+      // Sort after Promise.all resolves
+      imageFiles.sort((a, b) => a.title.localeCompare(b.title));
 
       return NextResponse.json({ 
         success: true,
