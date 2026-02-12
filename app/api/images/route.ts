@@ -102,6 +102,36 @@ async function loadMetadata(): Promise<Record<string, ImageMetadata>> {
   return {};
 }
 
+// Helper to map array-style metadata (like FakeStore API products) to the
+// shape expected by the frontend/gallery.
+function mapArrayMetadataToImages(metadataArray: any[], request?: NextRequest) {
+  const now = new Date();
+  return metadataArray.map((item, index) => {
+    const filename =
+      item.filename ||
+      (typeof item.image === 'string'
+        ? (item.image as string).split('/').pop()
+        : '');
+
+    const productImageUrl =
+      item.productImageUrl ||
+      (typeof item.image === 'string' ? item.image : null);
+
+    // uploadedAt: today's date, each item 1 minute earlier than the previous
+    const uploadedAt = new Date(now.getTime() - index * 60_000).toISOString();
+
+    return {
+      filename: filename || '',
+      productName: item.productName || item.title || filename || '',
+      title: item.title || filename || '',
+      productUrl: item.productUrl ?? null,
+      productImageUrl: productImageUrl,
+      description: item.description || '',
+      uploadedAt,
+    };
+  });
+}
+
 async function saveMetadata(metadata: Record<string, ImageMetadata>): Promise<void> {
   try {
     if (IS_VERCEL) {
@@ -138,6 +168,26 @@ export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
   try {
+    // First, check if bundled metadata.json is an array (FakeStore-style).
+    // If so, always serve from that, both locally and on Vercel, so you
+    // don't need to upload real files to see products.
+    try {
+      if (existsSync(METADATA_FILE)) {
+        const raw = await readFile(METADATA_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const imageFiles = mapArrayMetadataToImages(parsed, request);
+          return NextResponse.json({
+            success: true,
+            count: imageFiles.length,
+            images: imageFiles,
+          });
+        }
+      }
+    } catch (metaError) {
+      console.error('Error reading bundled array metadata.json:', metaError);
+    }
+
     if (IS_VERCEL) {
       if (!process.env.BLOB_READ_WRITE_TOKEN) {
         console.warn('BLOB_READ_WRITE_TOKEN not configured, returning empty list');
@@ -349,42 +399,6 @@ export async function GET(request: NextRequest) {
       }
     } else {
       const metadata: any = await loadMetadata();
-
-      // NEW MODE: metadata.json is an array of objects (like FakeStore products)
-      // In this case, we ignore the uploads directory and just expose the metadata.
-      if (Array.isArray(metadata)) {
-        const now = new Date();
-        const imageFiles = (metadata as any[]).map((item, index) => {
-          const filename =
-            item.filename ||
-            (typeof item.image === 'string'
-              ? (item.image as string).split('/').pop()
-              : '');
-
-          const productImageUrl =
-            item.productImageUrl ||
-            (typeof item.image === 'string' ? item.image : null);
-
-          // uploadedAt: today's date, each item 1 minute earlier than the previous
-          const uploadedAt = new Date(now.getTime() - index * 60_000).toISOString();
-
-          return {
-            filename: filename || '',
-            productName: item.productName || item.title || filename || '',
-            title: item.title || filename || '',
-            productUrl: item.productUrl ?? null,
-            productImageUrl: productImageUrl,
-            description: item.description || '',
-            uploadedAt,
-          };
-        });
-
-        return NextResponse.json({
-          success: true,
-          count: imageFiles.length,
-          images: imageFiles,
-        });
-      }
 
       // ORIGINAL MODE: metadata is an object keyed by filename and we
       // read actual image files from the uploads directory.
