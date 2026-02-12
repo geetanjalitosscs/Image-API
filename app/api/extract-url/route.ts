@@ -10,6 +10,7 @@ interface ImageMetadata {
   productUrl?: string;
   productName?: string;
   productDescription?: string;
+  productImageUrl?: string;
 }
 
 const METADATA_FILE = path.join(process.cwd(), 'public', 'uploads', 'metadata.json');
@@ -102,11 +103,8 @@ async function downloadAndSaveImage(imageUrl: string, productName: string, reque
     }
 
     console.log('Downloading image from:', imageUrl);
-    // Determine referer based on image URL
-    let referer = 'https://webscraper.io/';
-    if (imageUrl.includes('shopclues.com')) {
-      referer = 'https://www.shopclues.com/';
-    }
+    // Always use LimeRoad as referer for downloaded images
+    const referer = 'https://www.limeroad.com/';
     const imageResponse = await fetch(imageUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -168,12 +166,10 @@ async function extractProductDetails(productUrl: string): Promise<ProductDetails
     // Remove any fragments
     cleanUrl = cleanUrl.split('#')[0];
 
-    // Check if it's a supported site
-    const isWebScraper = cleanUrl.includes('webscraper.io');
-    const isShopClues = cleanUrl.includes('shopclues.com');
-    
-    if (!isWebScraper && !isShopClues) {
-      console.error('Invalid URL - must be webscraper.io or shopclues.com:', cleanUrl);
+    // Check if it's a supported site (only LimeRoad now)
+    const isShopClues = cleanUrl.includes('limeroad.com');
+    if (!isShopClues) {
+      console.error('Invalid URL - must be limeroad.com:', cleanUrl);
       return null;
     }
 
@@ -190,11 +186,11 @@ async function extractProductDetails(productUrl: string): Promise<ProductDetails
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
           'Accept-Language': 'en-US,en;q=0.9',
           'Accept-Encoding': 'gzip, deflate, br',
-          'Referer': isShopClues ? 'https://www.shopclues.com/' : 'https://webscraper.io/',
+          'Referer': 'https://www.limeroad.com/',
           'Cache-Control': 'no-cache',
           'Sec-Fetch-Dest': 'document',
           'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': isShopClues ? 'same-origin' : 'cross-site',
+          'Sec-Fetch-Site': 'same-origin',
           'Sec-Fetch-User': '?1',
           'Upgrade-Insecure-Requests': '1',
           'DNT': '1',
@@ -229,14 +225,14 @@ async function extractProductDetails(productUrl: string): Promise<ProductDetails
           html.includes('access denied') || html.includes('blocked') ||
           (html.toLowerCase().includes('cloudflare') && html.toLowerCase().includes('checking'))) {
         console.error('Access denied or blocked by website');
-        // For ShopClues, try to extract from URL even if blocked
+        // For LimeRoad, try to extract from URL even if blocked
         if (isShopClues) {
-          // Extract product ID from URL (format: -153555714.html)
-          const idMatch = cleanUrl.match(/-(\d+)\.html/i) || cleanUrl.match(/\/(\d+)\.html/i);
+          // Extract product ID from URL if present
+          const idMatch = cleanUrl.match(/-p(\d+)/i) || cleanUrl.match(/\/p(\d+)/i);
           const productId = idMatch ? idMatch[1] : null;
           
           // Extract product name from URL
-          const urlMatch = cleanUrl.match(/shopclues\.com\/[^\/]+\/([^\/]+)\.html/i);
+          const urlMatch = cleanUrl.match(/limeroad\.com\/[^\/?]+/i);
           let extractedName = '';
           if (urlMatch && urlMatch[1]) {
             extractedName = urlMatch[1]
@@ -247,17 +243,13 @@ async function extractProductDetails(productUrl: string): Promise<ProductDetails
           }
           
           // Construct image URL if we have product ID
-          let directImageUrl = '';
-          if (productId) {
-            // ShopClues image URL pattern: https://cdn2.shopclues.com/images1/thumbnails/{folder}/320/320/{productId}-{variant}-{timestamp}.jpg
-            // We'll try to construct a basic URL, but it might need the actual folder and variant
-            // For now, we'll extract from the page if possible, or use a placeholder
-            directImageUrl = `https://cdn2.shopclues.com/images1/thumbnails/117760/320/320/${productId}-117760104-1722251489.jpg`;
-          }
+          // LimeRoad is blocking server-side image access, so use a safe
+          // placeholder/external image URL instead.
+          let directImageUrl = 'https://fakestoreapi.com/img/81fPKd-2AYL._AC_SL1500_t.png';
           
           return {
-            productName: extractedName || 'ShopClues Product',
-            productDescription: 'Product from ShopClues',
+            productName: extractedName || 'LimeRoad Product',
+            productDescription: 'Product from LimeRoad',
             productImageUrl: directImageUrl,
             productUrl: cleanUrl,
           };
@@ -266,215 +258,127 @@ async function extractProductDetails(productUrl: string): Promise<ProductDetails
         return null;
       }
 
-      // Extract product name
+      // Extract product name from LimeRoad structure
       let productName = '';
-      
-      if (isShopClues) {
-        // Extract from ShopClues structure
-        // Try h1 tag first
-        const h1Match = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
-        if (h1Match && h1Match[1]) {
-          productName = h1Match[1].trim();
+      // Try h1 tag first
+      const h1Match = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+      if (h1Match && h1Match[1]) {
+        productName = h1Match[1].trim();
+      }
+      // Try meta property og:title
+      if (!productName) {
+        const ogTitleMatch = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i);
+        if (ogTitleMatch && ogTitleMatch[1]) {
+          productName = ogTitleMatch[1].trim();
         }
-        
-        // Try meta property og:title
-        if (!productName) {
-          const ogTitleMatch = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i);
-          if (ogTitleMatch && ogTitleMatch[1]) {
-            productName = ogTitleMatch[1].trim();
-          }
+      }
+      // Try title tag
+      if (!productName) {
+        const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+        if (titleMatch) {
+          productName = titleMatch[1]
+            .replace(/\s*-\s*LimeRoad.*$/i, '')
+            .replace(/\s*\|\s*LimeRoad.*$/i, '')
+            .trim();
         }
-        
-        // Try title tag
-        if (!productName) {
-          const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
-          if (titleMatch) {
-            productName = titleMatch[1].replace(/\s*-\s*ShopClues.*$/i, '').replace(/\s*\|\s*ShopClues.*$/i, '').trim();
-          }
-        }
-        
-        // Try JSON-LD
-        if (!productName) {
-          const jsonLdMatch = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i);
-          if (jsonLdMatch) {
-            try {
-              const jsonLd = JSON.parse(jsonLdMatch[1]);
-              if (jsonLd.name) {
-                productName = jsonLd.name;
-              } else if (jsonLd.headline) {
-                productName = jsonLd.headline;
-              }
-            } catch (e) {
-              // Ignore JSON parse errors
+      }
+      // Try JSON-LD
+      if (!productName) {
+        const jsonLdMatch = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i);
+        if (jsonLdMatch) {
+          try {
+            const jsonLd = JSON.parse(jsonLdMatch[1]);
+            if (jsonLd.name) {
+              productName = jsonLd.name;
+            } else if (jsonLd.headline) {
+              productName = jsonLd.headline;
             }
-          }
-        }
-      } else {
-        // Extract from webscraper.io structure
-        const nameMatch = html.match(/<h4[^>]*>([^<]+)<\/h4>/i) || 
-                         html.match(/<h3[^>]*>([^<]+)<\/h3>/i) ||
-                         html.match(/<h2[^>]*>([^<]+)<\/h2>/i);
-        if (nameMatch && nameMatch[1]) {
-          productName = nameMatch[1].trim();
-        }
-        
-        // Try title tag
-        if (!productName) {
-          const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
-          if (titleMatch) {
-            productName = titleMatch[1].replace(/\s*-\s*Web Scraper.*$/i, '').trim();
+          } catch (e) {
+            // Ignore JSON parse errors
           }
         }
       }
 
       // Extract product description
       let productDescription = '';
-      
-      if (isShopClues) {
-        // Extract description from ShopClues
-        // Try meta description
-        const metaDescMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
-        if (metaDescMatch && metaDescMatch[1]) {
-          productDescription = metaDescMatch[1].trim();
+      // Extract description from LimeRoad
+      // Try meta description
+      const metaDescMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+      if (metaDescMatch && metaDescMatch[1]) {
+        productDescription = metaDescMatch[1].trim();
+      }
+      // Try og:description
+      if (!productDescription || productDescription.length < 20) {
+        const ogDescMatch = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i);
+        if (ogDescMatch && ogDescMatch[1]) {
+          productDescription = ogDescMatch[1].trim();
         }
-        
-        // Try og:description
-        if (!productDescription || productDescription.length < 20) {
-          const ogDescMatch = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i);
-          if (ogDescMatch && ogDescMatch[1]) {
-            productDescription = ogDescMatch[1].trim();
-          }
-        }
-        
-        // Try product description section
-        if (!productDescription || productDescription.length < 20) {
-          const descMatch = html.match(/<div[^>]*class=["'][^"']*product[^"']*description[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) ||
-                          html.match(/<div[^>]*id=["'][^"']*description[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
-          if (descMatch && descMatch[1]) {
-            productDescription = descMatch[1].replace(/<[^>]*>/g, '').trim().substring(0, 200);
-          }
-        }
-      } else {
-        // Extract description from webscraper.io
-        const descMatch = html.match(/<p[^>]*>([^<]+(?:,\s*[^<]+)*)<\/p>/i) ||
-                       html.match(/<div[^>]*class="[^"]*description[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+      }
+      // Try product description section
+      if (!productDescription || productDescription.length < 20) {
+        const descMatch = html.match(/<div[^>]*class=["'][^"']*product[^"']*description[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) ||
+                        html.match(/<div[^>]*id=["'][^"']*description[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
         if (descMatch && descMatch[1]) {
-          productDescription = descMatch[1].replace(/<[^>]*>/g, '').trim();
-        }
-        
-        // Try to get text after product name
-        if (!productDescription || productDescription.length < 20) {
-          const textAfterName = html.split(productName)[1];
-          if (textAfterName) {
-            const descText = textAfterName.match(/<p[^>]*>([^<]+)<\/p>/i) ||
-                           textAfterName.match(/<div[^>]*>([^<]{50,})<\/div>/i);
-            if (descText && descText[1]) {
-              productDescription = descText[1].trim();
-            }
-          }
+          productDescription = descMatch[1].replace(/<[^>]*>/g, '').trim().substring(0, 200);
         }
       }
 
       // Extract product image URL
       let productImageUrl = '';
-      
-      if (isShopClues) {
-        // Extract image from ShopClues
-        // Try og:image first
-        const ogImageMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
-        if (ogImageMatch && ogImageMatch[1]) {
-          productImageUrl = ogImageMatch[1].trim();
-        }
-        
-        // Try JSON-LD
-        if (!productImageUrl) {
-          const jsonLdMatch = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i);
-          if (jsonLdMatch) {
-            try {
-              const jsonLd = JSON.parse(jsonLdMatch[1]);
-              if (jsonLd.image && typeof jsonLd.image === 'string') {
-                productImageUrl = jsonLd.image;
-              } else if (jsonLd.image && jsonLd.image.url) {
-                productImageUrl = jsonLd.image.url;
-              }
-            } catch (e) {
-              // Ignore JSON parse errors
+      // Extract image from LimeRoad
+      // Try og:image first
+      const ogImageMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+      if (ogImageMatch && ogImageMatch[1]) {
+        productImageUrl = ogImageMatch[1].trim();
+      }
+      // Try JSON-LD
+      if (!productImageUrl) {
+        const jsonLdMatch = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i);
+        if (jsonLdMatch) {
+          try {
+            const jsonLd = JSON.parse(jsonLdMatch[1]);
+            if (jsonLd.image && typeof jsonLd.image === 'string') {
+              productImageUrl = jsonLd.image;
+            } else if (jsonLd.image && jsonLd.image.url) {
+              productImageUrl = jsonLd.image.url;
             }
+          } catch (e) {
+            // Ignore JSON parse errors
           }
         }
-        
-        // Try img tags with product image classes
-        if (!productImageUrl) {
-          const imgMatch = html.match(/<img[^>]*class=["'][^"']*product[^"']*image[^"']*["'][^>]*src=["']([^"']+)["']/i) ||
-                          html.match(/<img[^>]*data-src=["']([^"']+)["']/i) ||
-                          html.match(/<img[^>]*id=["'][^"']*product[^"']*image[^"']*["'][^>]*src=["']([^"']+)["']/i);
-          if (imgMatch && imgMatch[1]) {
-            productImageUrl = imgMatch[1].trim();
-          }
+      }
+      // Try LimeRoad-specific image patterns
+      if (!productImageUrl) {
+        // 1) Main product image on LimeRoad uses itemprop="image" OR zmimgH class
+        const imgMatch =
+          html.match(/<img[^>]*itemprop=["']image["'][^>]*data-src=["']([^"']+)["'][^>]*>/i) ||
+          html.match(/<img[^>]*itemprop=["']image["'][^>]*src=["']([^"']+)["'][^>]*>/i) ||
+          html.match(/<img[^>]*class=["'][^"']*zmimgH[^"']*["'][^>]*data-src=["']([^"']+)["'][^>]*>/i) ||
+          html.match(/<img[^>]*class=["'][^"']*zmimgH[^"']*["'][^>]*src=["']([^"']+)["'][^>]*>/i) ||
+          html.match(/<img[^>]*data-src=["']([^"']+junaroad\.com[^"']*)["'][^>]*>/i);
+        if (imgMatch && imgMatch[1]) {
+          productImageUrl = imgMatch[1].trim();
         }
-        
-        // Try to construct image URL from product ID if HTML extraction failed
-        if (!productImageUrl) {
-          const idMatch = cleanUrl.match(/-(\d+)\.html/i) || cleanUrl.match(/\/(\d+)\.html/i);
-          const productId = idMatch ? idMatch[1] : null;
-          
-          if (productId) {
-            // Try to find image URL pattern in HTML (look for any ShopClues CDN image)
-            const imagePatternMatch = html.match(/cdn2\.shopclues\.com\/images1\/thumbnails\/(\d+)\/\d+\/\d+\/(\d+)-(\d+)-(\d+)\.jpg/i);
-            if (imagePatternMatch) {
-              const folder = imagePatternMatch[1];
-              const variant = imagePatternMatch[3];
-              const timestamp = imagePatternMatch[4];
-              // Use the product ID from URL, but folder/variant/timestamp from HTML
-              productImageUrl = `https://cdn2.shopclues.com/images1/thumbnails/${folder}/320/320/${productId}-${variant}-${timestamp}.jpg`;
-              console.log('Constructed ShopClues image URL from HTML pattern:', productImageUrl);
-            } else {
-              // Try to find any ShopClues image URL in HTML
-              const anyImageMatch = html.match(/(cdn2\.shopclues\.com\/images1\/thumbnails\/[^"'\s]+\.jpg)/i);
-              if (anyImageMatch && anyImageMatch[1]) {
-                productImageUrl = 'https://' + anyImageMatch[1];
-                console.log('Found ShopClues image URL in HTML:', productImageUrl);
-              } else {
-                // Fallback with default pattern (from user's example)
-                productImageUrl = `https://cdn2.shopclues.com/images1/thumbnails/117760/320/320/${productId}-117760104-1722251489.jpg`;
-                console.log('Constructed ShopClues image URL (fallback):', productImageUrl);
-              }
-            }
-          }
+      }
+      // Fallback to any img tag that looks like a product image (junaroad or limeroad domains)
+      if (!productImageUrl) {
+        const imgMatch =
+          html.match(/<img[^>]*src=["']([^"']+junaroad\.com[^"']*)["'][^>]*>/i) ||
+          html.match(/<img[^>]*src=["']([^"']+limeroad\.com[^"']*)["'][^>]*>/i) ||
+          html.match(/<img[^>]*src='([^']+junaroad\.com[^']*)'[^>]*>/i) ||
+          html.match(/<img[^>]*src='([^']+limeroad\.com[^']*)'[^>]*>/i);
+        if (imgMatch && imgMatch[1] && 
+            !imgMatch[1].includes('placeholder') && 
+            !imgMatch[1].includes('logo')) {
+          productImageUrl = imgMatch[1].trim();
         }
-        
-        // Fallback to any img tag
-        if (!productImageUrl) {
-          const imgMatch = html.match(/<img[^>]*src=["']([^"']+)["']/i) ||
-                          html.match(/<img[^>]*src='([^']+)'/i);
-          if (imgMatch && imgMatch[1] && 
-              !imgMatch[1].includes('placeholder') && 
-              !imgMatch[1].includes('logo') &&
-              imgMatch[1].includes('shopclues.com')) {
-            productImageUrl = imgMatch[1].trim();
-          }
-        }
-        
-        // Convert relative URLs to absolute
-        if (productImageUrl) {
-          if (productImageUrl.startsWith('//')) {
-            productImageUrl = 'https:' + productImageUrl;
-          } else if (productImageUrl.startsWith('/')) {
-            productImageUrl = 'https://www.shopclues.com' + productImageUrl;
-          }
-        }
-      } else {
-        // Extract image from webscraper.io
-        const imageMatch = html.match(/<img[^>]*src="([^"]+)"[^>]*>/i) ||
-                          html.match(/<img[^>]*src='([^']+)'[^>]*>/i);
-        if (imageMatch && imageMatch[1]) {
-          productImageUrl = imageMatch[1].trim();
-          // Convert relative URLs to absolute
-          if (productImageUrl.startsWith('//')) {
-            productImageUrl = 'https:' + productImageUrl;
-          } else if (productImageUrl.startsWith('/')) {
-            productImageUrl = 'https://webscraper.io' + productImageUrl;
-          }
+      }
+      // Convert relative URLs to absolute
+      if (productImageUrl) {
+        if (productImageUrl.startsWith('//')) {
+          productImageUrl = 'https:' + productImageUrl;
+        } else if (productImageUrl.startsWith('/')) {
+          productImageUrl = 'https://www.limeroad.com' + productImageUrl;
         }
       }
 
@@ -495,51 +399,25 @@ async function extractProductDetails(productUrl: string): Promise<ProductDetails
         .replace(/&#39;/g, "'")
         .trim();
 
-      // If we couldn't extract name, try to get it from URL or title
-      if (!productName) {
-        const titleMatch = html.match(/<title>(.*?)<\/title>/i);
-        if (titleMatch) {
-          productName = titleMatch[1].replace(/\s*-\s*Web Scraper.*$/i, '').trim();
-        }
-      }
-
-      // If still no name, try extracting from URL path
+      // If still no name, try extracting from LimeRoad URL path
       if (!productName || productName === 'Product') {
-        if (isShopClues) {
-          // For ShopClues, try to extract from URL structure
-          const urlMatch = cleanUrl.match(/shopclues\.com\/[^\/]+\/([^\/]+)\.html/i);
-          if (urlMatch && urlMatch[1]) {
-            productName = urlMatch[1]
-              .replace(/-/g, ' ')
-              .replace(/\b\w/g, (l: string) => l.toUpperCase())
-              .replace(/-\d+$/g, '')
-              .trim();
-          }
-        } else {
-          // For webscraper.io, try to extract from URL structure
-          const urlMatch = cleanUrl.match(/\/product\/(\d+)/);
-          if (urlMatch) {
-            productName = `Product ${urlMatch[1]}`;
-          }
+        const urlMatch = cleanUrl.match(/limeroad\.com\/([^/?]+)/i);
+        if (urlMatch && urlMatch[1]) {
+          productName = urlMatch[1]
+            .replace(/-/g, ' ')
+            .replace(/\b\w/g, (l: string) => l.toUpperCase())
+            .replace(/-\d+$/g, '')
+            .trim();
         }
       }
 
       // If still no name, use a default
       if (!productName) {
-        if (isShopClues) {
-          productName = 'ShopClues Product';
-        } else {
-          productName = 'Product from Web Scraper';
-        }
+        productName = 'LimeRoad Product';
       }
-
       // If no description, use a default
       if (!productDescription) {
-        if (isShopClues) {
-          productDescription = 'Product from ShopClues';
-        } else {
-          productDescription = 'Product details from Web Scraper test site';
-        }
+        productDescription = 'Product from LimeRoad';
       }
 
       // Even if image URL is not found, we should still return the data
@@ -568,7 +446,7 @@ async function extractProductDetails(productUrl: string): Promise<ProductDetails
       console.log('Attempting fallback extraction from URL');
       let urlMatch;
       if (isShopClues) {
-        urlMatch = cleanUrl.match(/shopclues\.com\/[^\/]+\/([^\/]+)\.html/i);
+        urlMatch = cleanUrl.match(/limeroad\.com\/([^/?]+)/i);
       } else {
         urlMatch = cleanUrl.match(/\/product\/(\d+)/);
       }
@@ -579,22 +457,9 @@ async function extractProductDetails(productUrl: string): Promise<ProductDetails
             .replace(/\b\w/g, (l: string) => l.toUpperCase())
             .replace(/-\d+$/g, '')
             .trim();
-          const idMatch = cleanUrl.match(/-(\d+)\.html/i);
-          const productId = idMatch ? idMatch[1] : null;
-          let imageUrl = '';
-          if (productId) {
-            imageUrl = `https://cdn2.shopclues.com/images1/thumbnails/117760/320/320/${productId}-117760104-1722251489.jpg`;
-          }
           return {
-            productName: extractedName || 'ShopClues Product',
-            productDescription: 'Product from ShopClues',
-            productImageUrl: imageUrl,
-            productUrl: cleanUrl,
-          };
-        } else {
-          return {
-            productName: `Product ${urlMatch[1]}`,
-            productDescription: 'Product details from Web Scraper test site',
+            productName: extractedName || 'LimeRoad Product',
+            productDescription: 'Product from LimeRoad',
             productImageUrl: '',
             productUrl: cleanUrl,
           };
@@ -608,10 +473,10 @@ async function extractProductDetails(productUrl: string): Promise<ProductDetails
     
     // Fallback: Try to extract basic info from URL
     try {
-      const isShopClues = productUrl.includes('shopclues.com');
+      const isShopClues = productUrl.includes('limeroad.com');
       let urlMatch;
       if (isShopClues) {
-        urlMatch = productUrl.match(/shopclues\.com\/[^\/]+\/([^\/]+)\.html/i);
+        urlMatch = productUrl.match(/limeroad\.com\/([^/?]+)/i);
       } else {
         urlMatch = productUrl.match(/\/product\/(\d+)/);
       }
@@ -622,22 +487,9 @@ async function extractProductDetails(productUrl: string): Promise<ProductDetails
             .replace(/\b\w/g, (l: string) => l.toUpperCase())
             .replace(/-\d+$/g, '')
             .trim();
-          const idMatch = productUrl.match(/-(\d+)\.html/i);
-          const productId = idMatch ? idMatch[1] : null;
-          let imageUrl = '';
-          if (productId) {
-            imageUrl = `https://cdn2.shopclues.com/images1/thumbnails/117760/320/320/${productId}-117760104-1722251489.jpg`;
-          }
           return {
-            productName: extractedName || 'ShopClues Product',
-            productDescription: 'Product from ShopClues',
-            productImageUrl: imageUrl,
-            productUrl: productUrl.trim(),
-          };
-        } else {
-          return {
-            productName: `Product ${urlMatch[1]}`,
-            productDescription: 'Product details from Web Scraper test site',
+            productName: extractedName || 'LimeRoad Product',
+            productDescription: 'Product from LimeRoad',
             productImageUrl: '',
             productUrl: productUrl.trim(),
           };
@@ -675,13 +527,12 @@ export async function POST(request: NextRequest) {
 
     const trimmedUrl = productUrl.trim();
     
-    // Validate URL format
-    const isWebScraper = trimmedUrl.includes('webscraper.io');
-    const isShopClues = trimmedUrl.includes('shopclues.com');
+    // Validate URL format (only LimeRoad is allowed now)
+    const isShopClues = trimmedUrl.includes('limeroad.com');
     
-    if (!isWebScraper && !isShopClues) {
+    if (!isShopClues) {
       return NextResponse.json(
-        { error: 'Please provide a valid webscraper.io or shopclues.com URL' },
+        { error: 'Please provide a valid limeroad.com URL' },
         { status: 400 }
       );
     }
@@ -739,6 +590,8 @@ export async function POST(request: NextRequest) {
         productUrl: productDetails.productUrl,
         productName: productDetails.productName,
         productDescription: productDetails.productDescription,
+        // Persist productImageUrl as well so /api/images can use external URLs
+        productImageUrl: productDetails.productImageUrl || undefined,
       };
       await saveMetadata(metadata);
       console.log('Saved metadata for:', savedFilename, 'with productUrl:', productDetails.productUrl);

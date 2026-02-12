@@ -189,7 +189,7 @@ export default function UploadPage() {
               type="url"
               value={productUrl}
               onChange={(e) => setProductUrl(e.target.value)}
-              placeholder="https://www.shopclues.com/... or https://webscraper.io/test-sites/..."
+              placeholder="https://www.limeroad.com/..."
               style={{ 
                 flex: 1,
                 padding: '0.75rem',
@@ -217,7 +217,7 @@ export default function UploadPage() {
             </button>
           </div>
           <p style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#6b7280' }}>
-            Paste a ShopClues or webscraper.io product URL and click "Extract Details" to get product information, or use it when uploading images
+            Paste a LimeRoad product URL and click "Extract Details" to get product information, or use it when uploading images
           </p>
         </div>
       </div>

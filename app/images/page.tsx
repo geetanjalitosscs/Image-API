@@ -34,13 +34,22 @@ export default function ImagesPage() {
         let imageData: ImageData[];
         if (data.images && Array.isArray(data.images)) {
           imageData = data.images.map((item: any) => {
-            // Use filename from API response, or extract from URL as fallback
-            const filename = item.filename || (item.url ? item.url.split('/').pop()?.split('?')[0] || '' : '');
+            // Prefer explicit productImageUrl (metadata mode), then url (blob mode)
+            const imageUrl: string =
+              (item.productImageUrl as string | undefined) ||
+              (item.url as string | undefined) ||
+              '';
+
+            // Use filename from API response, or extract from image URL as fallback
+            const filename: string =
+              (item.filename as string | undefined) ||
+              (imageUrl ? imageUrl.split('/').pop()?.split('?')[0] || '' : '');
+
             return {
-              url: item.url || '',
-              filename: filename,
-              title: item.title || '',
-              description: item.description || '',
+              url: imageUrl,
+              filename,
+              title: (item.title as string | undefined) || filename,
+              description: (item.description as string | undefined) || '',
             };
           });
         } else {
@@ -380,7 +389,7 @@ export default function ImagesPage() {
                   </a>
                   <span style={{ color: '#d1d5db' }}>|</span>
                   <a
-                    href={image.url}
+                    href={`/api/images/${encodeURIComponent(encodeURIComponent(image.filename))}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{

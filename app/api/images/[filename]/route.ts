@@ -97,9 +97,7 @@ export async function GET(
     }
 
     const ext = path.extname(filename).toLowerCase();
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
-    }
+    const isPlaceholder = filename.startsWith('placeholder_') && !ALLOWED_EXTENSIONS.includes(ext);
 
     const contentType = 
       ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
@@ -107,7 +105,7 @@ export async function GET(
       ext === '.webp' ? 'image/webp' :
       'application/octet-stream';
 
-    if (IS_VERCEL) {
+    if (IS_VERCEL && !isPlaceholder) {
       if (!process.env.BLOB_READ_WRITE_TOKEN) {
         return NextResponse.json({ error: 'Blob storage not configured' }, { status: 503 });
       }
@@ -219,39 +217,86 @@ export async function GET(
       }
     }
 
-    // Local file system
-    const decodedFilename = decodeURIComponent(filename);
-    const filePath = path.join(UPLOAD_DIR, decodedFilename);
+    // If metadata.json is an array (FakeStore-style metadata), try to serve
+    // this image directly from the external URL defined there.
+    try {
+      const metadata = await loadMetadata();
+      if (Array.isArray(metadata)) {
+        const entry = (metadata as any[]).find(item => {
+          const metaFilename: string | undefined = item.filename;
+          if (metaFilename && metaFilename === filename) return true;
+          const imageUrl: string | undefined = item.image;
+          if (!imageUrl) return false;
+          const base = imageUrl.split('/').pop()?.split('?')[0] || '';
+          return base === filename;
+        });
 
-    console.log('Serving image:', {
+        if (entry) {
+          const externalUrl: string | undefined =
+            entry.productImageUrl || entry.image;
+
+          if (externalUrl) {
+            const externalResponse = await fetch(externalUrl);
+            if (externalResponse.ok) {
+              const imageBlob = await externalResponse.blob();
+              return new NextResponse(imageBlob, {
+                headers: {
+                  'Content-Type': contentType,
+                  'Cache-Control': 'public, max-age=31536000, immutable',
+                },
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // If anything goes wrong with metadata/external fetch, fall back to local logic below.
+      console.error('Error serving image from metadata array:', e);
+    }
+
+    // Local file system
+    const decodedOnce = decodeURIComponent(filename);
+    let candidates = [decodedOnce, filename];
+    try {
+      const decodedTwice = decodeURIComponent(decodedOnce);
+      if (!candidates.includes(decodedTwice)) {
+        candidates.unshift(decodedTwice);
+      }
+    } catch {
+      // ignore double-decode errors
+    }
+
+    let resolvedPath: string | null = null;
+    let resolvedFilename = filename;
+
+    for (const candidate of candidates) {
+      const p = path.join(UPLOAD_DIR, candidate);
+      if (existsSync(p)) {
+        resolvedPath = p;
+        resolvedFilename = candidate;
+        break;
+      }
+    }
+
+    console.log('Serving image (local):', {
       requestedFilename: filename,
-      decodedFilename: decodedFilename,
-      filePath: filePath,
-      exists: existsSync(filePath)
+      candidates,
+      resolvedFilename,
+      resolvedPath,
+      exists: resolvedPath ? true : false,
     });
 
-    if (!existsSync(filePath)) {
-      // Try with original filename if decoded doesn't work
-      const altPath = path.join(UPLOAD_DIR, filename);
-      if (existsSync(altPath)) {
-        const fileBuffer = await readFile(altPath);
-        return new NextResponse(fileBuffer, {
-          headers: {
-            'Content-Type': contentType,
-            'Cache-Control': 'public, max-age=31536000, immutable',
-          },
-        });
-      }
-      console.error('File not found:', { filePath, altPath });
+    if (!resolvedPath) {
+      console.error('File not found for any candidate');
       return NextResponse.json({ 
         error: 'File not found',
-        details: `Looking for: ${decodedFilename}`
+        details: `Tried: ${candidates.join(', ')}`
       }, { status: 404 });
     }
 
-    const fileBuffer = await readFile(filePath);
+    const fileBuffer = await readFile(resolvedPath);
     
-    console.log('Successfully serving image:', decodedFilename);
+    console.log('Successfully serving image:', resolvedFilename);
     return new NextResponse(fileBuffer, {
       headers: {
         'Content-Type': contentType,
@@ -279,7 +324,9 @@ export async function DELETE(
     }
 
     const ext = path.extname(filename).toLowerCase();
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    const isPlaceholder = filename.startsWith('placeholder_') && !ALLOWED_EXTENSIONS.includes(ext);
+    // For real images, enforce extension check; allow placeholders (.txt) to be deleted as metadata-only
+    if (!ALLOWED_EXTENSIONS.includes(ext) && !isPlaceholder) {
       return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
     }
 
@@ -339,17 +386,17 @@ export async function DELETE(
         );
       }
     } else {
-      // Local file system
-      const filePath = path.join(UPLOAD_DIR, filename);
+      // Local file system or placeholder entries without actual image files
+      if (!isPlaceholder) {
+        const filePath = path.join(UPLOAD_DIR, filename);
 
-      if (!existsSync(filePath)) {
-        return NextResponse.json({ error: 'File not found' }, { status: 404 });
+        if (existsSync(filePath)) {
+          // Delete real file if it exists
+          await unlink(filePath);
+        }
       }
 
-      // Delete file
-      await unlink(filePath);
-      
-      // Remove from metadata
+      // Remove from metadata (for both real and placeholder entries)
       const metadata = await loadMetadata();
       if (metadata[filename]) {
         delete metadata[filename];

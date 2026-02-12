@@ -12,12 +12,16 @@ interface ImageInfo {
   size: number | null;
   uploadedAt: string | null;
   contentType: string | null;
+  productUrl?: string | null;
 }
 
 export default function ImageViewPage() {
   const params = useParams();
   const router = useRouter();
-  const filename = params.filename as string;
+  const rawParam = params.filename as string;
+  // Normalize filename: decode URI components and convert spaces back to '+'
+  // This fixes cases where '+' in filenames get turned into spaces in the route.
+  const filename = decodeURIComponent(rawParam).replace(/ /g, '+');
   const [imageInfo, setImageInfo] = useState<ImageInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,30 +43,41 @@ export default function ImageViewPage() {
               const extractedFilename = item.split('/').pop() || '';
               return {
                 filename: extractedFilename,
-                url: item
+                url: item,
+                title: extractedFilename,
+                description: '',
+                size: null,
+                uploadedAt: null,
+                contentType: null,
+                productUrl: null,
               };
             }
-            // Use filename from API response, or extract from URL as fallback
-            const url = item.url || '';
-            let extractedFilename = item.filename || '';
-            if (!extractedFilename) {
-              if (url.includes('blob.vercel-storage.com')) {
-                // Vercel blob URL - extract the actual filename
-                const urlParts = url.split('/');
-                extractedFilename = urlParts[urlParts.length - 1]?.split('?')[0] || '';
-              } else {
-                // API URL format
-                extractedFilename = url.split('/').pop()?.split('?')[0] || '';
-              }
+
+            // Prefer explicit productImageUrl (metadata mode), then url (blob mode)
+            const imageUrl: string =
+              (item.productImageUrl as string | undefined) ||
+              (item.url as string | undefined) ||
+              '';
+
+            // Use filename from API response, or extract from image URL as fallback
+            let extractedFilename: string =
+              (item.filename as string | undefined) ||
+              (imageUrl ? imageUrl.split('/').pop()?.split('?')[0] || '' : '');
+
+            if (!extractedFilename && imageUrl.includes('blob.vercel-storage.com')) {
+              const urlParts = imageUrl.split('/');
+              extractedFilename = urlParts[urlParts.length - 1]?.split('?')[0] || '';
             }
+
             return {
               filename: extractedFilename,
-              url: url,
-              title: item.title || '',
-              description: item.description || '',
+              url: imageUrl,
+              title: (item.title as string | undefined) || extractedFilename,
+              description: (item.description as string | undefined) || '',
               size: item.size || null,
               uploadedAt: item.uploadedAt || null,
               contentType: item.contentType || null,
+              productUrl: (item.productUrl as string | undefined) || null,
             };
           });
           
@@ -79,15 +94,35 @@ export default function ImageViewPage() {
                    imgBaseName === paramBaseName;
           });
           
-          if (!matchedImage) {
-            setError('Image not found');
-            return;
-          }
+        if (!matchedImage) {
+          // Fallback: image might exist on disk even if it's not in /api/images list
+          const fallbackApiUrl = `/api/images/${encodeURIComponent(encodeURIComponent(filename))}`;
+          setImageInfo({
+            filename: filename,
+            url: fallbackApiUrl,
+            apiUrl: fallbackApiUrl,
+            title: '',
+            description: '',
+            size: null,
+            uploadedAt: null,
+            contentType: null,
+            productUrl: null,
+          });
+          setCurrentIndex(-1);
+          setError(null);
+          return;
+        }
           
           const index = imageData.findIndex((img: any) => img.filename === matchedImage.filename);
           setCurrentIndex(index >= 0 ? index : 0);
-          // Ensure API URL is properly encoded
-          const apiUrl = `/api/images/${encodeURIComponent(matchedImage.filename)}`;
+
+          // If we have an external image URL (from metadata), use it directly.
+          // Otherwise, fall back to our internal API route.
+          const apiUrl =
+            matchedImage.url && matchedImage.url.startsWith('http') && !matchedImage.url.includes('/api/images/')
+              ? matchedImage.url
+              : `/api/images/${encodeURIComponent(encodeURIComponent(matchedImage.filename))}`;
+
           setImageInfo({
             filename: matchedImage.filename,
             url: matchedImage.url,
@@ -97,6 +132,7 @@ export default function ImageViewPage() {
             size: matchedImage.size || null,
             uploadedAt: matchedImage.uploadedAt || null,
             contentType: matchedImage.contentType || null,
+            productUrl: (matchedImage as any).productUrl || null,
           });
           console.log('Image info set:', {
             filename: matchedImage.filename,
@@ -256,7 +292,6 @@ export default function ImageViewPage() {
             style={{
               maxWidth: '100%',
               height: 'auto',
-              maxHeight: '70vh',
               borderRadius: '4px',
               boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
             }}
@@ -297,7 +332,7 @@ export default function ImageViewPage() {
           <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.75rem' }}>
             API Information
           </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <div>
               <strong style={{ fontSize: '0.875rem', color: '#6b7280' }}>API URL:</strong>
               <div
@@ -315,6 +350,7 @@ export default function ImageViewPage() {
                 {imageInfo.apiUrl}
               </div>
             </div>
+
             <div>
               <strong style={{ fontSize: '0.875rem', color: '#6b7280' }}>Filename:</strong>
               <div
@@ -332,6 +368,34 @@ export default function ImageViewPage() {
                 {imageInfo.filename}
               </div>
             </div>
+
+            {imageInfo.productUrl && (
+              <div>
+                <strong style={{ fontSize: '0.875rem', color: '#6b7280' }}>Product URL:</strong>
+                <div
+                  style={{
+                    marginTop: '0.25rem',
+                    padding: '0.5rem',
+                    background: 'white',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px',
+                    fontFamily: 'monospace',
+                    fontSize: '0.875rem',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  <a
+                    href={imageInfo.productUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: '#2563eb', textDecoration: 'none' }}
+                  >
+                    {imageInfo.productUrl}
+                  </a>
+                </div>
+              </div>
+            )}
+
             <div style={{ marginTop: '0.5rem' }}>
               <a
                 href={imageInfo.apiUrl}

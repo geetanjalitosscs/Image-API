@@ -9,6 +9,7 @@ interface ImageMetadata {
   productUrl?: string;
   productName?: string;
   productDescription?: string;
+  productImageUrl?: string;
 }
 
 const METADATA_FILE = path.join(process.cwd(), 'public', 'uploads', 'metadata.json');
@@ -347,6 +348,46 @@ export async function GET(request: NextRequest) {
         });
       }
     } else {
+      const metadata: any = await loadMetadata();
+
+      // NEW MODE: metadata.json is an array of objects (like FakeStore products)
+      // In this case, we ignore the uploads directory and just expose the metadata.
+      if (Array.isArray(metadata)) {
+        const now = new Date();
+        const imageFiles = (metadata as any[]).map((item, index) => {
+          const filename =
+            item.filename ||
+            (typeof item.image === 'string'
+              ? (item.image as string).split('/').pop()
+              : '');
+
+          const productImageUrl =
+            item.productImageUrl ||
+            (typeof item.image === 'string' ? item.image : null);
+
+          // uploadedAt: today's date, each item 1 minute earlier than the previous
+          const uploadedAt = new Date(now.getTime() - index * 60_000).toISOString();
+
+          return {
+            filename: filename || '',
+            productName: item.productName || item.title || filename || '',
+            title: item.title || filename || '',
+            productUrl: item.productUrl ?? null,
+            productImageUrl: productImageUrl,
+            description: item.description || '',
+            uploadedAt,
+          };
+        });
+
+        return NextResponse.json({
+          success: true,
+          count: imageFiles.length,
+          images: imageFiles,
+        });
+      }
+
+      // ORIGINAL MODE: metadata is an object keyed by filename and we
+      // read actual image files from the uploads directory.
       if (!existsSync(UPLOAD_DIR)) {
         return NextResponse.json({ 
           success: true,
@@ -355,8 +396,9 @@ export async function GET(request: NextRequest) {
         });
       }
 
-      const metadata = await loadMetadata();
       const files = await readdir(UPLOAD_DIR);
+
+      // Real image files present on disk
       const imageFiles = await Promise.all(
         files
           .filter(file => isValidImageFile(file))
@@ -371,10 +413,24 @@ export async function GET(request: NextRequest) {
             null;
           
           // Get metadata for this file
-          let fileMetadata = metadata[file] || {};
+
+          let fileMetadata: Partial<ImageMetadata> = metadata[file] || {};
+
+          // If not found by key, try matching by the stored filename field (supports cases
+          // where metadata key is different from actual filename, e.g. placeholder keys)
+          if (!fileMetadata || Object.keys(fileMetadata).length === 0) {
+            const byFilename = (Object.values(metadata) as ImageMetadata[]).find((entry: ImageMetadata) => {
+              if (!entry || !entry.filename) return false;
+              const entryBase = path.basename(entry.filename);
+              return entry.filename === file || entryBase === file;
+            });
+            if (byFilename) {
+              fileMetadata = byFilename;
+            }
+          }
           
           // If productUrl not found, try to find it by matching base filename (without random suffix)
-          if (!fileMetadata.productUrl) {
+          if (!(fileMetadata as ImageMetadata).productUrl) {
             const baseName = file.replace(ext, '');
             const baseParts = baseName.split('_');
             if (baseParts.length > 1) {
@@ -399,26 +455,33 @@ export async function GET(request: NextRequest) {
           }
           
           // Use product name if available, otherwise extract from filename
-          const productName = fileMetadata.productName || extractProductName(file);
+          const productName = (fileMetadata as ImageMetadata).productName || extractProductName(file);
           
           // If still no productUrl, try to find it by matching productName in all metadata
-          let productUrl = fileMetadata.productUrl || null;
+          let productUrl = (fileMetadata as ImageMetadata).productUrl || null;
           if (!productUrl && productName) {
             // First try exact match
-            let matchingEntry = Object.values(metadata).find(entry => 
-              entry.productName && 
-              entry.productName.toLowerCase().trim() === productName.toLowerCase().trim() &&
-              entry.productUrl
+            let matchingEntry = (Object.values(metadata) as ImageMetadata[]).find(
+              (entry: ImageMetadata) =>
+                entry.productName &&
+                entry.productUrl &&
+                entry.productName.toLowerCase().trim() === productName.toLowerCase().trim()
             );
             
             // If no exact match, try partial match (check if productName contains key words)
             if (!matchingEntry) {
-              const productNameWords = productName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-              matchingEntry = Object.values(metadata).find(entry => {
+              const productNameWords = productName
+                .toLowerCase()
+                .split(/\s+/)
+                .filter((w: string) => w.length > 3);
+
+              matchingEntry = (Object.values(metadata) as ImageMetadata[]).find((entry: ImageMetadata) => {
                 if (!entry.productName || !entry.productUrl) return false;
                 const entryWords = entry.productName.toLowerCase().split(/\s+/);
                 // Check if at least 2 key words match
-                const matchingWords = productNameWords.filter(w => entryWords.some(ew => ew.includes(w) || w.includes(ew)));
+                const matchingWords = productNameWords.filter((w: string) =>
+                  entryWords.some(ew => ew.includes(w) || w.includes(ew))
+                );
                 return matchingWords.length >= 2;
               });
             }
@@ -432,13 +495,15 @@ export async function GET(request: NextRequest) {
               }
               updatedMetadata[file].productUrl = productUrl;
               await saveMetadata(updatedMetadata);
-              fileMetadata.productUrl = productUrl;
+              (fileMetadata as any).productUrl = productUrl;
             }
           }
           
           // If still no productUrl, try to extract from description
           if (!productUrl) {
-            const description = fileMetadata.productDescription || (stats ? `Image uploaded on ${new Date(stats.mtime).toLocaleDateString()}` : 'Image');
+              const description =
+                (fileMetadata as ImageMetadata).productDescription ||
+                (stats ? `Image uploaded on ${new Date(stats.mtime).toLocaleDateString()}` : 'Image');
             // Try to find URL in description
             const urlMatch = description.match(/https?:\/\/[^\s\)]+/i);
             if (urlMatch && urlMatch[0]) {
@@ -451,15 +516,61 @@ export async function GET(request: NextRequest) {
                 }
                 updatedMetadata[file].productUrl = productUrl;
                 await saveMetadata(updatedMetadata);
-                fileMetadata.productUrl = productUrl;
+                (fileMetadata as any).productUrl = productUrl;
               }
             }
           }
-          const productImageUrl = getProductImageUrl(file, request);
-          
+
+          // Last-resort fallback: if we still don't have a productUrl but there is exactly
+          // one metadata entry with a productUrl (like your LimeRoad placeholder),
+          // use that URL for this image as well.
+          if (!productUrl) {
+            const entriesWithUrl = (Object.values(metadata) as ImageMetadata[]).filter(
+              (entry: ImageMetadata) => !!entry.productUrl
+            );
+            if (entriesWithUrl.length === 1) {
+              productUrl = entriesWithUrl[0].productUrl || null;
+              if (productUrl) {
+                const updatedMetadata = await loadMetadata();
+                if (!updatedMetadata[file]) {
+                  updatedMetadata[file] = { filename: file };
+                }
+                updatedMetadata[file].productUrl = productUrl;
+                await saveMetadata(updatedMetadata);
+                (fileMetadata as any).productUrl = productUrl;
+              }
+            }
+          }
+
+          // Similar fallback for productImageUrl: if this image has no explicit
+          // productImageUrl in metadata, but there is exactly one entry that has it
+          // (e.g. placeholder saved by extract-url), reuse that URL.
+          let productImageUrlFromMetadata = (fileMetadata as ImageMetadata).productImageUrl || null;
+          if (!productImageUrlFromMetadata) {
+            const entriesWithImage = (Object.values(metadata) as ImageMetadata[]).filter(
+              (entry: ImageMetadata) => !!entry.productImageUrl
+            );
+            if (entriesWithImage.length === 1) {
+              productImageUrlFromMetadata = entriesWithImage[0].productImageUrl || null;
+              if (productImageUrlFromMetadata) {
+                const updatedMetadata = await loadMetadata();
+                if (!updatedMetadata[file]) {
+                  updatedMetadata[file] = { filename: file };
+                }
+                updatedMetadata[file].productImageUrl = productImageUrlFromMetadata;
+                await saveMetadata(updatedMetadata);
+                (fileMetadata as any).productImageUrl = productImageUrlFromMetadata;
+              }
+            }
+          }
+
+          // Prefer explicit productImageUrl from metadata if available (e.g. external URL),
+          // otherwise fall back to our internal API image URL
+          const productImageUrl =
+            productImageUrlFromMetadata || getProductImageUrl(file, request);
           // Return complete image data in specified order
           const title = file.replace(ext, '').replace(/_/g, ' ').trim() || 'Untitled Image';
-          const description = fileMetadata.productDescription || (stats ? `Image uploaded on ${new Date(stats.mtime).toLocaleDateString()}` : 'Image');
+          const description = (fileMetadata as any).productDescription || (stats ? `Image uploaded on ${new Date(stats.mtime).toLocaleDateString()}` : 'Image');
           
           return {
             filename: file,
@@ -472,14 +583,36 @@ export async function GET(request: NextRequest) {
           };
           })
       );
-      
-      // Sort after Promise.all resolves
-      imageFiles.sort((a, b) => a.title.localeCompare(b.title));
+
+      // Placeholder entries that have metadata but no actual image file
+        const placeholderImages = (Object.values(metadata) as ImageMetadata[])
+        .filter((entry: ImageMetadata) => entry.filename && !files.includes(entry.filename) && !isValidImageFile(entry.filename))
+        .map((entry: ImageMetadata) => {
+          const filename = entry.filename;
+          const productName = entry.productName || extractProductName(filename);
+          const title = productName || filename.replace(path.extname(filename), '').replace(/_/g, ' ').trim() || 'Placeholder Image';
+          const description = entry.productDescription || 'Image not available (placeholder entry)';
+
+          return {
+            filename,
+            productName,
+            title,
+            productUrl: entry.productUrl || null,
+            productImageUrl: '', // No actual image file; frontend will show "Image not available"
+            description,
+            uploadedAt: null,
+          };
+        });
+
+      const allImages = [...imageFiles, ...placeholderImages];
+
+      // Sort after combining real and placeholder images
+      allImages.sort((a, b) => a.title.localeCompare(b.title));
 
       return NextResponse.json({ 
         success: true,
-        count: imageFiles.length,
-        images: imageFiles
+        count: allImages.length,
+        images: allImages
       });
     }
   } catch (error) {
